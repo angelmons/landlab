@@ -60,6 +60,7 @@ from .potentiality_flowrouting import PotentialityFlowRouter
 from .priority_flood_flow_router import PriorityFloodFlowRouter
 from .profiler import ChannelProfiler, Profiler, TrickleDownProfiler
 from .radiation import Radiation
+from .river_temperature_dynamics import RiverTemperatureDynamics
 from .sink_fill import SinkFiller, SinkFillerBarnes
 from .soil_moisture import SoilInfiltrationGreenAmpt, SoilMoisture
 from .space import Space, SpaceLargeScaleEroder
@@ -138,6 +139,7 @@ COMPONENTS = [
     PrecipitationDistribution,
     Profiler,
     Radiation,
+    RiverTemperatureDynamics,
     SedDepEroder,
     SedimentPulserAtLinks,
     SedimentPulserEachParcel,
