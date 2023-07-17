@@ -547,10 +547,11 @@ class RiverTemperatureDynamics(Component):
         u_r = V[self._r_l]
         A_r = h[self._r_l] * dy
         T_r = T
+        print('T_r\n');print(T_r)
         (Id,) = np.where(u_r<0)
         T_r[Id] = T[self._r_n][Id]
         f_r = n[:,0] * u_r * A_r * T_r
-        #print('f_r\n');print(f_r)
+        print('T_r\n');print(T_r)
 
         # flux at left face - X direction
         u_l = V[self._l_l]
@@ -585,10 +586,10 @@ class RiverTemperatureDynamics(Component):
 
         self._grid["node"]["surface_water__temperature"][self._grid.boundary_nodes] = \
             T0[self._grid.boundary_nodes]
-        a = (dt/dx) * (f_r + f_l) * ( 1 / (0.5 * (A_r + A_l) ) )
-        b = (dt/dy) * (f_u + f_d) * ( 1 / (0.5 * (A_u + A_d) ) )
-        print('k1\n');print(a)
-        print('k2\n');print(b)
+        #a = (dt/dx) * (f_r + f_l) * ( 1 / (0.5 * (A_r + A_l) ) )
+        #b = (dt/dy) * (f_u + f_d) * ( 1 / (0.5 * (A_u + A_d) ) )
+        #print('k1\n');print(a)
+        #print('k2\n');print(b)
     def run_one_step(self):
         """ Calculates the water temperature across the grid.
 
