@@ -538,58 +538,45 @@ class RiverTemperatureDynamics(Component):
         V = self._grid["link"]["surface_water__velocity"]
         h = self._grid["link"]["surface_water__depth"]
         dx , dy = self._grid.dx , self._grid.dy
-        T = self._grid["node"]["surface_water__temperature"]
-        T0 = self._grid["node"]["surface_water__temperature"]
+        T  = copy.deepcopy(self._grid["node"]["surface_water__temperature"])
         n = self._normal
         dt = self._dt
 
         # flux at right face - X direction
         u_r = V[self._r_l]
         A_r = h[self._r_l] * dy
-        T_r = T
-        print('T_r\n');print(T_r)
-        (Id,) = np.where(u_r<0)
-        T_r[Id] = T[self._r_n][Id]
+        T_r = copy.deepcopy(T)
+        T_r[u_r<0] = T[self._r_n][u_r<0]       
         f_r = n[:,0] * u_r * A_r * T_r
-        print('T_r\n');print(T_r)
 
         # flux at left face - X direction
         u_l = V[self._l_l]
         A_l = h[self._l_l] * dy
-        T_l = T[self._l_n]
-        (Id,) = np.where(u_l<0)
-        T_l[Id] = T[Id]
+        T_l = T[self._l_n]          
+        T_l[u_l<0] = T[u_l<0]
         f_l = n[:,2] * u_l * A_l * T_l
-        #print('f_l\n');print(f_l)
 
         # flux at upper face - Y direction
         u_u = V[self._u_l]
         A_u = h[self._u_l] * dx
-        T_u = T
-        (Id,) = np.where(u_u<0)
-        T_u[Id] = T[self._u_n][Id]
+        T_u = copy.deepcopy(T)
+        T_u[u_u<0] = T[self._u_n][u_u<0]
         f_u = n[:,1] * u_u * A_u * T_u
-        #print('f_u\n');print(f_u)
 
-        # flux at lower face - Y direction
+        # flux at lower face - Y direction     
         u_d = V[self._d_l]
         A_d = h[self._d_l] * dx
         T_d = T[self._d_n]
-        (Id,) = np.where(u_d<0)
-        T_d[Id] = T[Id]
+        T_d[u_d<0] = T[u_d<0]
         f_d = n[:,3] * u_d * A_d * T_d
-        #print('f_d\n');print(f_d)
                
         self._grid["node"]["surface_water__temperature"] = T - \
             (dt/dx) * (f_r + f_l) * ( 1 / (0.5 * (A_r + A_l) ) ) - \
             (dt/dy) * (f_u + f_d) * ( 1 / (0.5 * (A_u + A_d) ) )
 
         self._grid["node"]["surface_water__temperature"][self._grid.boundary_nodes] = \
-            T0[self._grid.boundary_nodes]
-        #a = (dt/dx) * (f_r + f_l) * ( 1 / (0.5 * (A_r + A_l) ) )
-        #b = (dt/dy) * (f_u + f_d) * ( 1 / (0.5 * (A_u + A_d) ) )
-        #print('k1\n');print(a)
-        #print('k2\n');print(b)
+            T[self._grid.boundary_nodes]
+
     def run_one_step(self):
         """ Calculates the water temperature across the grid.
 
