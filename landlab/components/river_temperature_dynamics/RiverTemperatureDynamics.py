@@ -346,7 +346,7 @@ class RiverTemperatureDynamics(Component):
             "intent": "out",
             "optional": True,
             "units": "W/m^2",
-            "mapping": "cell",
+            "mapping": "node",
             "doc": "net incident shortwave radiation over the time step",
         },
         "surface_water__depth": {
@@ -356,6 +356,14 @@ class RiverTemperatureDynamics(Component):
             "units": "m",
             "mapping": "link",
             "doc": "Depth of water on the surface",
+        },
+        "surface_water__dispersion_coefficient": {
+            "dtype": float,
+            "intent": "in",
+            "optional": False,
+            "units": "m2/s",
+            "mapping": "node",
+            "doc": "Dispersion coefficient of the surface water",
         },
         "surface_water__velocity": {
             "dtype": float,
@@ -412,14 +420,14 @@ class RiverTemperatureDynamics(Component):
         """
         super().__init__(grid)
 
-        self._Ca = 0.6 # Brundt's coefficient
-        self._e = 0.97 # Emmisivity - For calculating emitted long wave radiation 
+        self._Ca = 0.6  # Brundt's coefficient
+        self._e = 0.97  # Emmisivity - For calculating emitted long wave radiation 
         self._g = scipy.constants.g  # Acceleration due to gravity (m/s**2).
         self._rho = rho # Water density (kg/m^3)
         self._shade_factor = shade_factor
         self._stefan_boltzmann_const=0.0000000567 # ( Wm^(-2) K^(-4) )
         self._Rl = 0.03 # Reflective coefficient) 
-        self._dt = dt
+        self._dt = dt   # time step
 
         # Creating optional grid fields at time zero- If the grid field was not
         # defined before instantiation it will create it and fill all values
@@ -461,6 +469,15 @@ class RiverTemperatureDynamics(Component):
             print("'radiation__incoming_shortwave_flux' at nodes - Initialized")
 
         try:
+            self._grid["node"]["surface_water__dispersion_coefficient"] = grid.add_zeros(
+                "surface_water__dispersion_coefficient",
+                at="node",
+                units=self._info["surface_water__dispersion_coefficient"]["units"],
+            )
+        except FieldError:
+            print("'surface_water__dispersion_coefficient' at nodes - Initialized")
+
+        try:
             self._grid["node"]["surface_water__temperature"] = grid.add_zeros(
                 "surface_water__temperature",
                 at="node",
@@ -468,7 +485,7 @@ class RiverTemperatureDynamics(Component):
             )
         except FieldError:
             print("'surface_water__temperature' at nodes - Initialized")
-        
+
         # Creates the "air__vapor_pressure" field
         self._grid["node"]["air__vapor_pressure"] = np.full(
             grid.number_of_nodes,0)
@@ -576,6 +593,43 @@ class RiverTemperatureDynamics(Component):
 
         self._grid["node"]["surface_water__temperature"][self._grid.boundary_nodes] = \
             T[self._grid.boundary_nodes]
+        
+    def temperature_difusion(self):
+        """
+        Check1 = T(2:size(T,1)-1,:) < T(1:size(T,1)-2,:);
+        Temp_in_Prev  = zeros(size(T,1)-2,1);
+        Temp_out_Prev = zeros(size(T,1)-2,1);
+        T0 = (  (0.5*(D(2:size(D,1)-1,:) + D(1:size(D,1)-2,:))).* ...
+                (0.5*(A(2:size(A,1)-1,:) + A(1:size(A,1)-2,:))) ).* ...
+                abs(T(2:size(T,1)-1,:) - T(1:size(D,1)-2,:)) * (1/Dx);
+        ind = find(Check1);
+        Temp_in_Prev(ind) = Temp_in1(ind);
+
+        ind = find(~Check1);
+        Temp_out_Prev(ind) = Temp_out1(ind);
+        """
+        D = self._grid["node"]["surface_water__dispersion_coefficient"]
+        dx , dy = self._grid.dx , self._grid.dy
+        Ax = self._grid["link"]["surface_water__depth"] * dy
+        Ay = self._grid["link"]["surface_water__depth"] * dx
+        T  = copy.deepcopy(self._grid["node"]["surface_water__temperature"])
+        n = self._normal
+        dt = self._dt
+
+        # Temperature increases in + direction
+        # For horizontal nodes
+        D = 0.5 * (D[self._r_n] + D)
+        A = 0.5 * (Ax[self._r_n] + Ax)
+        T_diff = np.abs(T[self._r_n] - T)
+        T_0 = (D * A * T_diff) * (1/dx)
+        T_in_0 = np.zeros_like(self._grid["node"]["surface_water__temperature"])
+        T_out_0 = np.zeros_like(self._grid["node"]["surface_water__temperature"])
+
+        (id,) = np.where(T[self._r_n] < T)
+        T_in_0[id] = T_0[id]
+        (id,) = np.where(T[self._r_n] > T)
+        T_out_0[id] = T_0[id]
+
 
     def run_one_step(self):
         """ Calculates the water temperature across the grid.
@@ -586,7 +640,9 @@ class RiverTemperatureDynamics(Component):
         ..."""
         self.water_specific_heat()
         self.temperature_advection()
+        self.temperature_difusion()
         self.atmospheric_net_heat_exchange()
+      
         #DT_atm = self._grid["node"]["atmospheric__net_heat_exchange"] / \
         #    (self._grid["node"]["surface_water__specific_heat"] * self._rho)
         #print(DT_atm)
