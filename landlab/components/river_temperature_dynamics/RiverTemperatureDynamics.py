@@ -15,7 +15,7 @@ Examples
 
 Create a grid on which to calculate river temperature
 
->>> grid = RasterModelGrid((5, 5))
+>>> grid = RasterModelGrid((10, 15))
 
 The grid will need some data to run the RiverTemperatureDynamics component.
 To check the names of the fields that provide input use the *input_var_names*
@@ -23,85 +23,44 @@ class property.
 
 >>> RiverTemperatureDynamics.input_var_names
 ('surface_water__depth',
+ 'surface_water__dispersion_coefficient',
  'surface_water__temperature',
- 'surface_water__velocity',
- 'topographic__elevation')
+ 'surface_water__velocity')
 
 Create fields of data for each of these input variables. When running a
-complete simulation some of these variables will be created by the flow model.
+complete simulation some of these variables could be created by the flow model.
 Notice that surface water depth and velocity are required at links. However,
 specifying these variables at nodes is easier and then we can map the fields
-onto links. By doing so, we don't have to deal with links numbering. When this
-component is coupled to OverlandFlow there is no need to map fields because it
-is done automatically within the component.
+onto links. By doing so, we don't have to deal with links numbering. 
 
-We create the bed surface grain size (GSD) distribution location. We assume
-that there are two different GSD within the watershed (labeled as 0 and 1)
+In this example we set uniform and constant values for depth, dispersion coeffiente, and
+velocity
 
->>> grid.at_node['surface_water__temperature'] = np.array([
-... 20, 21., 21., 21., 20,
-... 20, 21., 21., 21., 20,
-... 20, 21., 21., 21., 20,
-... 20, 21., 21., 21., 20,
-... 20, 21., 21., 21., 20,])
-
-Now we create the topography data
-
->>> grid.at_node['topographic__elevation'] = np.array([
-... 1.07, 1.06, 1.00, 1.06, 1.07,
-... 1.08, 1.07, 1.03, 1.07, 1.08,
-... 1.09, 1.08, 1.07, 1.08, 1.09,
-... 1.09, 1.09, 1.08, 1.09, 1.09,
-... 1.09, 1.09, 1.09, 1.09, 1.09,])
-
-and set the boundary conditions
-
->>> grid.set_watershed_boundary_condition(grid.at_node['topographic__elevation'])
-
-And check the node status
-
->>> grid.status_at_node
-array([4, 4, 1, 4, 4, 4, 0, 0, 0, 4, 4, 0, 0, 0, 4, 4, 0, 0, 0, 4, 4, 4, 4,
-       4, 4], dtype=uint8)
-
-Which tell us that there is one outlet located on the 3rd node
-
-the topography data can be display using
->>> imshow_grid(grid,'topographic__elevation')
-
-Now we add some water into the watershed. In this case is specified in nodes
-
->>> grid.at_node['surface_water__depth'] = np.array([
-... 0.102, 0.102, 0.102, 0.102, 0.102,
-... 0.102, 0.102, 0.102, 0.102, 0.102,
-... 0.102, 0.102, 0.102, 0.102, 0.102,
-... 0.102, 0.102, 0.102, 0.102, 0.102,
-... 0.102, 0.102, 0.102, 0.102, 0.102,])
-
-There are other most efficient ways to fill the 'surface_water__depth', but for
-demonstration purposes we show the extended version. A more efficient way to
-set the previous field could be:
-grid.at_node['surface_water__depth'] = np.full(grid.number_of_nodes,0.102)
-
-Now, we give the water a velocity.
-
->>> grid.at_node['surface_water__velocity'] = np.array([
-... 0.25, 0.25, 0.25, 0.25, 0.25,
-... 0.25, 0.25, 0.25, 0.25, 0.25,
-... 0.25, 0.25, 0.25, 0.25, 0.25,
-... 0.25, 0.25, 0.25, 0.25, 0.25,
-... 0.25, 0.25, 0.25, 0.25, 0.25,])
+>>> grid.at_node['surface_water__depth'] = np.full(grid.number_of_nodes,0.5,dtype='float')
+>>> grid.at_node['surface_water__dispersion_coefficient'] = np.full(grid.number_of_nodes,0.1,dtype='float')
+>>> grid.at_node['surface_water__velocity'] = np.full(grid.number_of_nodes,0.25,dtype='float')
 
 Note that in this example, we are attempting to specify a vector at a node
 using a single value. This is done intentionally to emphasize the process.
 The component will interpret this as the vector's magnitude, and, given its
-location in the grid, it will manifest different components. When using
-OverlandFlow, there is no need to specify a velocity because it is a
-byproduct of the component.
+location in the grid, it will manifest different components.
 
-By default, when creating our grid we used a spacing of 1 m in the x and y
-directions. Therefore, the discharge is 0.0255 m3/s. Discharge is always in
-units of m3/s.
+Now we set the water temperature, at one point the temperature is 2 degrees higher than the rest
+of the domain. 
+
+>>> grid.at_node['surface_water__temperature'] = np.full(grid.number_of_nodes,10.0,dtype='float')
+>>> grid.at_node['surface_water__temperature'][17] = 12
+
+the temperature data can be display using
+
+>>> imshow_grid(grid,'surface_water__temperature',vmin = 10, vmax =12)
+
+Let's set some of the atmospheric conditions too:
+
+>>> grid.at_node["radiation__incoming_shortwave_flux"] = np.full(grid.number_of_nodes,250.0,dtype='float')
+>>> grid.at_node["air__temperature"] = np.full(grid.number_of_nodes,15.0,dtype='float')
+>>> grid.at_node["air__relative_humidity"] = np.full(grid.number_of_nodes,5,dtype='float')
+>>> grid.at_node["air__velocity"] = np.full(grid.number_of_nodes,2,dtype='float')
 
 Now we map nodes into links when it is required
 
@@ -110,148 +69,29 @@ Now we map nodes into links when it is required
 >>> grid['link']['surface_water__velocity'] = \
     map_mean_of_link_nodes_to_link(grid,'surface_water__velocity')
 
-Provide a time step, usually an output of OverlandFlow, but it can be
-overridden with a custom value.
+Provide a time step
 
->>> timeStep = 1 # time step in seconds
+>>> dt = 0.25 # time step in seconds
 
 Instantiate the `RiverTemperatureDynamics` component to work on the grid, and run it.
 
->>> RTD = RiverTemperatureDynamics(grid)
->>> RTD.run_one_step()
+>>> RTD = RiverTemperatureDynamics(grid,dt=dt)
 
-After instantiating RiverTemperatureDynamics, new fields have been added to the grid.
-Use the *output_var_names* property to see the names of the fields
-that have been changed.
+And we let it run for 10 seconds to observe changes in water temperature
+we kept the temperature at 12 degrees at the 17th node.
+>>> t = 0
+>>> while t < 10:
+>>>     grid.at_node['surface_water__temperature'][17] = 12
+>>>     RTD.run_one_step()
+>>>     t += dt 
 
->>> RTD.output_var_names
-('bed_surface__geometric_mean_size',
- 'bed_surface__geometric_standard_deviation_size',
- 'bed_surface__grain_size_distribution',
- 'bed_surface__median_size',
- 'bed_surface__sand_fraction',
- 'sediment_transport__bedload_grain_size_distribution',
- 'sediment_transport__bedload_rate',
- 'sediment_transport__net_bedload',
- 'surface_water__shear_stress')
+the updated temperature data can be display using
 
-The `sediment_transport__bedload_rate` field is defined at nodes.
+>>> imshow_grid(grid,'surface_water__temperature',vmin = 10, vmax =12)
 
->>> RBD.var_loc('sediment_transport__net_bedload')
-'node'
-
->>> grid.at_node['sediment_transport__net_bedload'] # doctest: +NORMALIZE_WHITESPACE
-array([  0.00000000e+00,   0.00000000e+00,   0.00000000e+00,
-         0.00000000e+00,   0.00000000e+00,   0.00000000e+00,
-         1.59750963e-03,  -4.79298187e-03,   1.59750963e-03,
-         0.00000000e+00,   0.00000000e+00,   1.50988732e-07,
-         1.59720766e-03,   1.50988732e-07,   0.00000000e+00,
-         0.00000000e+00,   3.01977464e-07,  -1.50988732e-07,
-         3.01977464e-07,   0.00000000e+00,   0.00000000e+00,
-         0.00000000e+00,   0.00000000e+00,   0.00000000e+00,
-         0.00000000e+00])
-
-The 'surface_water__shear_stress' field is defined at links.
-
->>> RBD.var_loc('surface_water__shear_stress')
-'link'
-
->>> grid.at_link['surface_water__shear_stress'] # doctest: +NORMALIZE_WHITESPACE
-array([  0.      ,  60.016698,  60.016698,   0.      ,   0.      ,
-         0.      ,   0.      ,   0.      ,   0.      ,   0.      ,
-        40.011132,  40.011132,   0.      ,  10.002783,  10.002783,
-        40.011132,  10.002783,  10.002783,   0.      ,  10.002783,
-        10.002783,   0.      ,   0.      ,  10.002783,  10.002783,
-        10.002783,   0.      ,   0.      ,  10.002783,  10.002783,
-         0.      ,   0.      ,   0.      ,   0.      ,   0.      ,
-         0.      ,   0.      ,   0.      ,   0.      ,   0.      ])
-
-Considering the link upstream the watershed exit, link Id 15, we can obtain the
-bed load transport rate
-
->>> grid.at_link['sediment_transport__bedload_rate'][15]
--0.0015976606223666004
-
-Therefore, the bed load transport rate according to Parker 1991 surface-based
-equation is 1.598 * 10^-3 m2/s. Negative means that is going in the negative
-Y direction
-
-The GSD at this place is:
-
->>> grid.at_link['sediment_transport__bedload_grain_size_distribution'][15]
-array([ 0.47501858,  0.52498142])
-
-Which in cummulative percentage is equivalent to
-D mm    % Finer
-32      100.000
-16      52.498
-8       0.000
-
-Grain sizes are always given in mm.
-We can also check the bed load grain size distribution in all links
-
->>> grid.at_link['sediment_transport__bedload_grain_size_distribution']
-array([[ 0.        ,  0.        ],
-       [ 0.48479122,  0.51520878],
-       [ 0.48479122,  0.51520878],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.47501858,  0.52498142],
-       [ 0.47501858,  0.52498142],
-       [ 0.        ,  0.        ],
-       [ 0.54055384,  0.45944616],
-       [ 0.28225526,  0.71774474],
-       [ 0.47501858,  0.52498142],
-       [ 0.28225526,  0.71774474],
-       [ 0.54055384,  0.45944616],
-       [ 0.        ,  0.        ],
-       [ 0.28225526,  0.71774474],
-       [ 0.28225526,  0.71774474],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.28225526,  0.71774474],
-       [ 0.28225526,  0.71774474],
-       [ 0.28225526,  0.71774474],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.28225526,  0.71774474],
-       [ 0.28225526,  0.71774474],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ],
-       [ 0.        ,  0.        ]])
-
-Zeros indicate that there is no sediment transport of that grain size
-at that location.
-
-After the flow acted on the bed and sediment transport occured we can check
-the new topographic elevation field
-
->>> grid.at_node['topographic__elevation']  # doctest: +NORMALIZE_WHITESPACE
-array([ 1.07      ,  1.06      ,  1.00737382,  1.06      ,  1.07      ,
-        1.08      ,  1.06754229,  1.03737382,  1.06754229,  1.08      ,
-        1.09      ,  1.07999977,  1.06754276,  1.07999977,  1.09      ,
-        1.09      ,  1.08999954,  1.08000023,  1.08999954,  1.09      ,
-        1.09      ,  1.09      ,  1.09      ,  1.09      ,  1.09      ])
 """
 import copy
-import os
-import shutil
-import time
-
 import numpy as np
-import pandas as pd
 import scipy.constants
 from scipy.interpolate import interp1d
 
@@ -391,14 +231,10 @@ class RiverTemperatureDynamics(Component):
         dt=1,  # Sets the time step (s). When coupled to
         # OverlandFlow, this value is adjusted dynamically.
     ):
-        """Calculates the evolution of a river bed based on bed load transport
-        and fractional rates on links. An external flow hydraulics solver, such
-        as OverlandFlow, is required to predict flow variables in time and space.
-        The shear stress used in sediment transport equations takes into account
-        the time and spatial variability of water depth and flow velocity.
-
-        This component adjusts topographic elevation and grain size
-        distribution at each node within a Landlab grid.
+        """Calculates the evolution of a river temperature based on the advection - 
+        dispersion equation. Also, account for heat exchange with the atmosphere. 
+        An external flow hydraulics solver, such as OverlandFlow, is required to
+        predict flow variables in time and space.
 
         Parameters
         ----------
@@ -439,7 +275,7 @@ class RiverTemperatureDynamics(Component):
                 units=self._info["air__temperature"]["units"],
             )
         except FieldError:
-            print("'air__temperature' at links - Initialized")
+            print("'air__temperature' at nodes - Initialized")
 
         try:
             self._grid["node"]["air__relative_humidity"] = grid.add_zeros(
@@ -448,7 +284,7 @@ class RiverTemperatureDynamics(Component):
                 units=self._info["air__relative_humidity"]["units"],
             )
         except FieldError:
-            print("'air__relative_humidity' at links - Initialized")
+            print("'air__relative_humidity' at nodes - Initialized")
 
         try:
             self._grid["node"]["air__velocity"] = grid.add_zeros(
@@ -457,7 +293,7 @@ class RiverTemperatureDynamics(Component):
                 units=self._info["air__velocity"]["units"],
             )
         except FieldError:
-            print("'air__velocity' at links - Initialized")
+            print("'air__velocity' at nodes - Initialized")
 
         try:
             self._grid["node"]["radiation__incoming_shortwave_flux"] = grid.add_zeros(
@@ -469,13 +305,35 @@ class RiverTemperatureDynamics(Component):
             print("'radiation__incoming_shortwave_flux' at nodes - Initialized")
 
         try:
-            self._grid["node"]["surface_water__dispersion_coefficient"] = grid.add_zeros(
+            self._grid["node"]["surface_water__depth"] = \
+                grid.add_zeros(
+                "surface_water__depth",
+                at="link",
+                units=self._info["surface_water__depth"]["units"],
+            )
+        except FieldError:
+            print("'surface_water__depth' at links - Initialized")
+
+
+        try:
+            self._grid["node"]["surface_water__dispersion_coefficient"] = \
+                grid.add_zeros(
                 "surface_water__dispersion_coefficient",
                 at="node",
                 units=self._info["surface_water__dispersion_coefficient"]["units"],
             )
         except FieldError:
             print("'surface_water__dispersion_coefficient' at nodes - Initialized")
+
+        try:
+            self._grid["node"]["surface_water__velocity"] = grid.add_zeros(
+                "surface_water__velocity",
+                at="link",
+                units=self._info["surface_water__velocity"]["units"],
+            )
+        except FieldError:
+            print("'surface_water__velocity' at links - Initialized")
+
 
         try:
             self._grid["node"]["surface_water__temperature"] = grid.add_zeros(
@@ -489,7 +347,7 @@ class RiverTemperatureDynamics(Component):
         # Creates the "air__vapor_pressure" field
         self._grid["node"]["air__vapor_pressure"] = np.full(
             grid.number_of_nodes,0)
-
+        
         # Creates the "atmospheric__net_heat_exchange" field
         self._grid["node"]["atmospheric__net_heat_exchange"] = np.full(
             grid.number_of_nodes,0)
@@ -522,16 +380,16 @@ class RiverTemperatureDynamics(Component):
         self._normal = -(self._grid.link_dirs_at_node)
 
         # Define water specific heat values as a function of temperature
-        # Columns are: T [c] and c_w  [Jkg^(-1) K^(-1)].
+        # Columns are: T [c] and c_w  [kg^(-1) K^(-1)].
         # # Then it creates an interpolation function
         specific_heat = np.array([
-            [0.01,4.2174],
-            [10,4.1910],
-            [20,4.1570], 
-            [25,4.1379],
-            [30,4.1175],
-            [40,4.0737],
-            [50,4.0264]])
+            [0.01,4217.4],
+            [10,4191.0],
+            [20,4157.0], 
+            [25,4137.9],
+            [30,4117.5],
+            [40,4073.7],
+            [50,4026.4]])
 
         self._specific_heat_f = interp1d(specific_heat[:, 0],specific_heat[:, 1])
 
@@ -549,9 +407,17 @@ class RiverTemperatureDynamics(Component):
         self._l_n = self._grid.adjacent_nodes_at_node[:,2] # left node
         self._u_n = self._grid.adjacent_nodes_at_node[:,1] # upper node
         self._d_n = self._grid.adjacent_nodes_at_node[:,3] # lower node
+ 
+    def water_specific_heat(self):
+        """ Calculates the water specific heat in [kJ/(kg K)] 
+        Water temperature (input) is specified in degrees """
 
+        self._grid["node"]["surface_water__specific_heat"] = \
+            self._specific_heat_f(self._grid["node"]["surface_water__temperature"])
+        
     def temperature_advection(self):
         """ Calculates temperature advection """
+
         V = self._grid["link"]["surface_water__velocity"]
         h = self._grid["link"]["surface_water__depth"]
         dx , dy = self._grid.dx , self._grid.dy
@@ -594,107 +460,109 @@ class RiverTemperatureDynamics(Component):
         self._grid["node"]["surface_water__temperature"][self._grid.boundary_nodes] = \
             T[self._grid.boundary_nodes]
         
-    def temperature_difusion(self):
-        """
-        Check1 = T(2:size(T,1)-1,:) < T(1:size(T,1)-2,:);
-        Temp_in_Prev  = zeros(size(T,1)-2,1);
-        Temp_out_Prev = zeros(size(T,1)-2,1);
-        T0 = (  (0.5*(D(2:size(D,1)-1,:) + D(1:size(D,1)-2,:))).* ...
-                (0.5*(A(2:size(A,1)-1,:) + A(1:size(A,1)-2,:))) ).* ...
-                abs(T(2:size(T,1)-1,:) - T(1:size(D,1)-2,:)) * (1/Dx);
-        ind = find(Check1);
-        Temp_in_Prev(ind) = Temp_in1(ind);
+    def temperature_dispersion(self):
+        """ Calculates temperature dispersion """
 
-        ind = find(~Check1);
-        Temp_out_Prev(ind) = Temp_out1(ind);
-        """
         D = self._grid["node"]["surface_water__dispersion_coefficient"]
         dx , dy = self._grid.dx , self._grid.dy
-        Ax = self._grid["link"]["surface_water__depth"] * dy
-        Ay = self._grid["link"]["surface_water__depth"] * dx
-        T  = copy.deepcopy(self._grid["node"]["surface_water__temperature"])
-        n = self._normal
+        Ax = self._grid["node"]["surface_water__depth"] * dy
+        Ay = self._grid["node"]["surface_water__depth"] * dx
         dt = self._dt
+        T  = copy.deepcopy(self._grid["node"]["surface_water__temperature"])
 
-        # Temperature increases in + direction
-        # For horizontal nodes
+        # Right face flux
         D = 0.5 * (D[self._r_n] + D)
         A = 0.5 * (Ax[self._r_n] + Ax)
         T_diff = np.abs(T[self._r_n] - T)
         T_0 = (D * A * T_diff) * (1/dx)
-        T_in_0 = np.zeros_like(self._grid["node"]["surface_water__temperature"])
-        T_out_0 = np.zeros_like(self._grid["node"]["surface_water__temperature"])
+        f_in_r = np.zeros_like(T)
+        f_out_r = np.zeros_like(T)
 
-        (id,) = np.where(T[self._r_n] < T)
-        T_in_0[id] = T_0[id]
-        (id,) = np.where(T[self._r_n] > T)
-        T_out_0[id] = T_0[id]
+        id = T[self._r_n] > T
+        f_in_r[id] = T_0[id]    # Flow from x+i to x
+        f_out_r[~id] = T_0[~id] # Flow from x to x+1        
+        
+        # Left face flux
+        D = 0.5 * (D[self._l_n] + D)
+        A = 0.5 * (Ax[self._l_n] + Ax)
+        T_diff = np.abs(T[self._l_n] - T)
+        T_0 = (D * A * T_diff) * (1/dx)
+        f_in_l = np.zeros_like(T)
+        f_out_l = np.zeros_like(T)
 
+        id = T[self._l_n] > T
+        f_in_l[id] = T_0[id]    # Flow from x-i to x
+        f_out_l[~id] = T_0[~id] # Flow from x to x-i
 
-    def run_one_step(self):
-        """ Calculates the water temperature across the grid.
+        # Upper face flux
+        D = 0.5 * (D[self._u_n] + D)
+        A = 0.5 * (Ax[self._u_n] + Ax)
+        T_diff = np.abs(T[self._u_n] - T)
+        T_0 = (D * A * T_diff) * (1/dx)
+        f_in_u = np.zeros_like(T)
+        f_out_u = np.zeros_like(T)
 
-        For one time step, it generates the atmospheric net heat exchange and
-        the temperature change associated with this flux across a given
-        grid 
-        ..."""
-        self.water_specific_heat()
-        self.temperature_advection()
-        self.temperature_difusion()
-        self.atmospheric_net_heat_exchange()
-      
-        #DT_atm = self._grid["node"]["atmospheric__net_heat_exchange"] / \
-        #    (self._grid["node"]["surface_water__specific_heat"] * self._rho)
-        #print(DT_atm)
+        id = T[self._u_n] > T 
+        f_in_u[id] = T_0[id]    # Flow from y+i to x
+        f_out_u[~id] = T_0[~id] # Flow from y to y+1
+
+        # Lower face flux
+        D = 0.5 * (D[self._d_n] + D)
+        A = 0.5 * (Ax[self._d_n] + Ax)
+        T_diff = np.abs(T[self._d_n] - T)
+        T_0 = (D * A * T_diff) * (1/dx)
+        f_in_d = np.zeros_like(T)
+        f_out_d = np.zeros_like(T)
+
+        id = T[self._d_n] > T
+        f_in_d[id] = T_0[id]    # Flow from y-i to y
+        f_out_d[~id] = T_0[~id] # Flow from y to y-i
+
+        f_in_x = f_in_l + f_in_r
+        f_out_x = f_out_l + f_out_r
+        f_in_y = f_in_u + f_in_d
+        f_out_y = f_out_u + f_out_d
+
+        self._grid["node"]["surface_water__temperature"] = T - \
+            (dt/dx) * (f_out_x - f_in_x) * ( 1 / Ax ) - \
+            (dt/dy) * (f_out_y - f_in_y) * ( 1 / Ay )
+        
+        self._grid["node"]["surface_water__temperature"][self._grid.boundary_nodes] = \
+            T[self._grid.boundary_nodes]
 
     def atmospheric_net_heat_exchange(self):
-        """ The atmospheric net heat exchange H_atm [W/m^2] to or from the water column
-        (positive for incoming fluxes) is:
+        """ The atmospheric net heat exchange H_atm [W/m^2] to or from the water 
+        column (positive for incoming fluxes) is:
         H_atm = H_sn + H_an + H_br + H_e + H_c
-        
-        The incoming net short-wave radiation flux H_sn is:
-        H_sn = 0.97 H_si (1.0-SF)
-        H_si is the total incoming radiation in [W/m^2]
-        which is corrected with albedo (3%) and a user-provided shade factor SF [0 to 1] 
-        (0.2 by default). 
-
-        Incoming long wave radiation H_an is:
-        H_an =σ (T_a + 273.15)^4 (Ca + 0.084900481√(e_a ))(1 - R_l)
-        σ=5.67x10^(-8) Wm^(-2) K^(-4) is the Stefan-Boltzman constant
-        T_a [°C] is the air temperature, 
-        e_a [kPa] is the air vapor pressure, e_a = 0.01 RH e_v
-        e_v [kPa] is the saturation of vapor pressure (Tetens equation)
-        e_v = 0.61078 e^((17.27 T_a)/(T_a+273.3))
-        RH [%] is the relative humidity 
-        Ca=0.6 Brundt's coefficient
-        R_l=0.03 is the reflective coefficient
-
-        The emitted long wave radiation H_br is :
-        H_br = -σ ϵ ( T + 273.15)^4,
-        T is the water temperature
-        ϵ=0.97 is the emissivity
-
-        The evaporation (latent) heat flux H_e is :
-        H_e = - ( 9.2 + 0.46 v_w^2 )( e_v-e_a),
-        where v_w [m/s] is the 2m-above-soil wind speed.
-
-        The convective (sensible) heat flux H_c is:
-        H_c = - 0.47 ( 9.2 + 0.46 v_w^2 )(T-T_a).
         """
+
+        """ Incoming net short-wave radiation flux H_sn
         # H_sn = 0.97 H_si (1.0-SF)
+        # H_si is the total incoming radiation in [W/m^2]
+        # corrected with albedo (3%) and a user-provided shade factor SF [0 to 1]
+        # (0.2 by default). """
         self._grid["node"]["radiation__net_shortwave_flux"] = 0.97 * \
             self._grid["node"]["radiation__incoming_shortwave_flux"] * \
             (1 - self._shade_factor)
-        
-        # e_v =0.61078 e^((17.27 T_a)/(T_a+273.3))
+
+        # Saturation of vapor pressure (Tetens equation)
+        # e_v =0.61078 e^((17.27 T_a)/(T_a+273.3)) [kPa]
+        # T_a [°C] is the air temperature
         self._grid["node"]["vapor_pressure__saturation"] = 0.61078 * \
             np.exp( (17.27 * self._grid["node"]["air__temperature"]) / \
                    (self._grid["node"]["air__temperature"] + 273.3) )
-        # e_a = 0.01 RH e_v
+
+        # air vapor pressure
+        # e_a = 0.01 RH e_v [kPa]
+        # RH [%] is the relative humidity 
         self._grid["node"]["air__vapor_pressure"] = 0.01 * \
             self._grid["node"]["air__relative_humidity"] * \
             self._grid["node"]["vapor_pressure__saturation"]
 
+        # Incoming long wave radiation
+        # σ=5.67x10^(-8) [W/[m^2 K^4]] is the Stefan-Boltzman constant
+        # R_l=0.03 is the reflective coefficient
+        # Ca=0.6 Brundt's coefficient
         # H_an = σ (T_a + 273.15)^4 (Ca + 0.084900481√(e_a ))(1 - R_l)
         self._grid["node"]["radiation__incoming_longwave_flux"] = \
             self._stefan_boltzmann_const * \
@@ -703,17 +571,23 @@ class RiverTemperatureDynamics(Component):
              np.sqrt(self._grid["node"]["air__vapor_pressure"])) * \
              (1 - self._Rl)
         
+        # Emitted long wave radiation
         # H_br = -σ ϵ ( T + 273.15)^4
+        # ϵ=0.97 is the emissivity
+        # T is the water temperature
         self._grid["node"]["radiation__emitted_longwave_flux"] = \
         - (self._stefan_boltzmann_const * self._e) * \
         ( self._grid["node"]["surface_water__temperature"] + 273.15)**4
 
+        # Evaporation (latent) heat flux
         # H_e = - ( 9.2 + 0.46 v_w^2 )( e_v-e_a)
+        # v_w [m/s] is the 2m-above-soil wind speed.
         self._grid["node"]["heat_flux__evaporation"] = \
             - (9.2 + 0.46 * self._grid["node"]["air__velocity"]**2) * \
             (self._grid["node"]["vapor_pressure__saturation"] - 
              self._grid["node"]["air__vapor_pressure"])
 
+        # Convective (sensible) heat flux
         # H_c = - 0.47 ( 9.2 + 0.46 v_w^2 )(T-T_a)
         self._grid["node"]["heat_flux__convective"] = -0.47 * \
             ( 9.2 + 0.46 * self._grid["node"]["air__velocity"]**2) * \
@@ -727,10 +601,23 @@ class RiverTemperatureDynamics(Component):
             self._grid["node"]["radiation__emitted_longwave_flux"] + \
             self._grid["node"]["heat_flux__evaporation"] + \
             self._grid["node"]["heat_flux__convective"]
-            
-    def water_specific_heat(self):
-        """ Calculates the water specific heat in [kJ/(kg K)] 
-        Water temperature (input) is specified in degrees """
+        
+        DT = self._grid["node"]["atmospheric__net_heat_exchange"] / \
+            (self._grid["node"]["surface_water__depth"] * \
+             self._grid["node"]["surface_water__specific_heat"] * \
+             self._rho)
+        
+        self._grid["node"]["surface_water__temperature"] = \
+            self._grid["node"]["surface_water__temperature"] + \
+            self._dt * DT
 
-        self._grid["node"]["surface_water__specific_heat"] = \
-            self._specific_heat_f(self._grid["node"]["surface_water__temperature"])
+    def run_one_step(self):
+        """ Calculates the water temperature across the grid.
+
+        For one time step, it calculates the advection, dispersion and atmospheric net
+        heat exchange of water temperatura across a given grid  """
+
+        self.water_specific_heat()
+        self.temperature_advection()
+        self.temperature_dispersion()
+        self.atmospheric_net_heat_exchange()     
