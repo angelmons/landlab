@@ -7,9 +7,10 @@ import nox
 
 PROJECT = "landlab"
 ROOT = pathlib.Path(__file__).parent
+PYTHON_VERSION = "3.11"
 
 
-@nox.session(venv_backend="mamba")
+@nox.session(python=PYTHON_VERSION, venv_backend="mamba")
 def test(session: nox.Session) -> None:
     """Run the tests."""
     os.environ["WITH_OPENMP"] = "1"
@@ -38,7 +39,7 @@ def test(session: nox.Session) -> None:
         session.run("coverage", "report", "--ignore-errors", "--show-missing")
 
 
-@nox.session(name="test-notebooks", venv_backend="mamba")
+@nox.session(name="test-notebooks", python=PYTHON_VERSION, venv_backend="mamba")
 def test_notebooks(session: nox.Session) -> None:
     """Run the notebooks."""
     args = [
@@ -54,9 +55,8 @@ def test_notebooks(session: nox.Session) -> None:
 
     os.environ["WITH_OPENMP"] = "1"
 
-    session.install("git+https://github.com/mcflugen/nbmake.git@mcflugen/add-markers")
     # session.conda_install("c-compiler", "cxx-compiler")
-    session.conda_install("richdem")
+    session.conda_install("richdem", channel=["nodefaults", "conda-forge"])
     session.conda_install(
         "pytest",
         "pytest-xdist",
@@ -66,9 +66,9 @@ def test_notebooks(session: nox.Session) -> None:
         "requirements-testing.in",
         "--file",
         "requirements.in",
-        "--file",
-        "requirements-testing.in",
+        channel=["nodefaults", "conda-forge"],
     )
+    session.install("git+https://github.com/mcflugen/nbmake.git@mcflugen/add-markers")
     session.install("-e", ".", "--no-deps")
 
     session.run(*args)
@@ -124,7 +124,6 @@ def build_index(session: nox.Session) -> None:
     session.log(f"generated index at {index_file!s}")
 
 
-# @nox.session(name="build-docs", venv_backend="mamba")
 @nox.session(name="build-docs")
 def build_docs(session: nox.Session) -> None:
     """Build the docs."""
@@ -169,7 +168,7 @@ def locks(session: nox.Session) -> None:
     # session.run("conda-lock", "lock", "--mamba", "--kind=lock")
 
 
-@nox.session(name="sync-requirements", python="3.11", venv_backend="conda")
+@nox.session(name="sync-requirements", python=PYTHON_VERSION, venv_backend="conda")
 def sync_requirements(session: nox.Session) -> None:
     """Sync requirements.in with pyproject.toml."""
     with open("requirements.in", "w") as fp:
