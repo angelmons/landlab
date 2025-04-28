@@ -1,0 +1,21 @@
+name: Draft PDF
+on: [push]
+
+jobs:
+  paper:
+    runs-on: ubuntu-latest
+    name: Paper Draft
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Build draft PDF
+        uses: openjournals/openjournals-draft-action@master
+        with:
+          journal: joss
+          # Updated path to match your paper's location
+          paper-path: joss/in_preparation/river_flow_dynamics/paper.md
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper
+          path: joss/in_preparation/river_flow_dynamics/paper.pdf
