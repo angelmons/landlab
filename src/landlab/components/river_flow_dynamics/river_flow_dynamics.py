@@ -723,17 +723,43 @@ class RiverFlowDynamics(Component):
                 self._v_vel_of_particle < 1e-10, 0, self._v_vel_of_particle
             )
 
-            ### Calculation accoss x-direction
-            # Avoiding divisions by zero
-            tempCalc1 = np.where(
-                self._u_vel_of_particle == 0, 9999, self._u_vel_of_particle
+            # Small velocity handling for both components
+            self._u_vel_of_particle = np.where(
+                np.abs(self._u_vel_of_particle) < 1e-10, 
+                0, self._u_vel_of_particle
             )
-            tempCalc2 = np.where(u_vel_at_x1 == 0, 9999, u_vel_at_x1)
-            tempCalc3 = np.where(gradient_x_direction == 0, 9999, gradient_x_direction)
-            TAUx = (1 / tempCalc3) * np.log(abs(tempCalc1 / tempCalc2))
+            self._v_vel_of_particle = np.where(
+                np.abs(self._v_vel_of_particle) < 1e-10, 
+                0, self._v_vel_of_particle
+            )
+
+            ### Calculation across x-direction
+            safe_threshold = 1e-12
+            tempCalc1 = np.where(
+                np.abs(self._u_vel_of_particle) < safe_threshold, 
+                np.sign(self._u_vel_of_particle) * safe_threshold, 
+                self._u_vel_of_particle
+            )
+            tempCalc2 = np.where(
+                np.abs(u_vel_at_x1) < safe_threshold, 
+                np.sign(u_vel_at_x1) * safe_threshold, 
+                u_vel_at_x1
+            )
+            tempCalc3 = np.where(
+                np.abs(gradient_x_direction) < safe_threshold, 
+                np.sign(gradient_x_direction) * safe_threshold, 
+                gradient_x_direction
+            )
+
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ratio = tempCalc1 / tempCalc2
+                ratio = np.where(np.isfinite(ratio), ratio, 1.0)
+                ratio = np.clip(ratio, safe_threshold, 1/safe_threshold)
+                TAUx = (1 / tempCalc3) * np.log(np.abs(ratio))
 
             # Calculation when gradient is equal to zero
-            tempCalc4 = abs((self._x_of_particle - x_at_x1) / tempCalc2)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                tempCalc4 = abs((self._x_of_particle - x_at_x1) / tempCalc2)
             TAUx = np.where(gradient_x_direction == 0, tempCalc4, TAUx)
 
             # Calculation when:
@@ -741,25 +767,43 @@ class RiverFlowDynamics(Component):
             # b) Uxp,Vyp = 0,
             # c) Ux1,Vy1 = 0, and
             # d) Uxp/Ux1, Vxp/Vy1 = -1
-            tempCalc5 = self._u_vel_of_particle / tempCalc2
+            with np.errstate(divide='ignore', invalid='ignore'):
+                tempCalc5 = self._u_vel_of_particle / tempCalc2
             TAUx = np.where(tempCalc5 == 1, tempCalc4, TAUx)
             TAUx = np.where(self._u_vel_of_particle == 0, remaining_time, TAUx)
             TAUx = np.where(u_vel_at_x1 == 0, remaining_time, TAUx)
             TAUx = np.where(tempCalc5 < 0, remaining_time, TAUx)
-            TAUx = np.where(TAUx > self._dt, self._dt, TAUx)
-            TAUx = np.where(TAUx < 0, 0, TAUx)
+            TAUx = np.where(TAUx >= self._dt, self._dt, TAUx)
+            TAUx = np.where(TAUx <= 0, 0, TAUx)
 
             ### Calculation across y-direction
-            # Avoiding divisions by zero
+            # Division-by-zero handling (same as x-direction)
+            safe_threshold = 1e-12
             tempCalc1 = np.where(
-                self._v_vel_of_particle == 0, 9999, self._v_vel_of_particle
+                np.abs(self._v_vel_of_particle) < safe_threshold, 
+                np.sign(self._v_vel_of_particle) * safe_threshold, 
+                self._v_vel_of_particle
             )
-            tempCalc2 = np.where(v_vel_at_y1 == 0, 9999, v_vel_at_y1)
-            tempCalc3 = np.where(gradient_y_direction == 0, 9999, gradient_y_direction)
-            TAUy = (1 / tempCalc3) * np.log(abs(tempCalc1 / tempCalc2))
+            tempCalc2 = np.where(
+                np.abs(v_vel_at_y1) < safe_threshold, 
+                np.sign(v_vel_at_y1) * safe_threshold, 
+                v_vel_at_y1
+            )
+            tempCalc3 = np.where(
+                np.abs(gradient_y_direction) < safe_threshold, 
+                np.sign(gradient_y_direction) * safe_threshold, 
+                gradient_y_direction
+            )
+
+            with np.errstate(divide='ignore', invalid='ignore'):
+                ratio = tempCalc1 / tempCalc2
+                ratio = np.where(np.isfinite(ratio), ratio, 1.0)
+                ratio = np.clip(ratio, safe_threshold, 1/safe_threshold)
+                TAUy = (1 / tempCalc3) * np.log(np.abs(ratio))
 
             # Calculation when gradient is equal to zero
-            tempCalc4 = abs((self._y_of_particle - y_at_y1) / tempCalc2)
+            with np.errstate(divide='ignore', invalid='ignore'):
+                tempCalc4 = abs((self._y_of_particle - y_at_y1) / tempCalc2)
             TAUy = np.where(gradient_y_direction == 0, tempCalc4, TAUy)
 
             # Calculation when
@@ -767,13 +811,14 @@ class RiverFlowDynamics(Component):
             # b) Uxp,Vyp = 0,
             # c) Ux1,Vy1 = 0, and
             # d) Uxp/Ux1, Vxp/Vy1 = -1
-            tempCalc5 = self._v_vel_of_particle / tempCalc2
+            with np.errstate(divide='ignore', invalid='ignore'):
+                tempCalc5 = self._v_vel_of_particle / tempCalc2
             TAUy = np.where(tempCalc5 == 1, tempCalc4, TAUy)
             TAUy = np.where(self._v_vel_of_particle == 0, remaining_time, TAUy)
             TAUy = np.where(v_vel_at_y1 == 0, remaining_time, TAUy)
             TAUy = np.where(tempCalc5 < 0, remaining_time, TAUy)
-            TAUy = np.where(TAUy > self._dt, self._dt, TAUy)
-            TAUy = np.where(TAUy < 0, 0, TAUy)
+            TAUy = np.where(TAUy >= self._dt, self._dt, TAUy)
+            TAUy = np.where(TAUy <= 0, 0, TAUy)
 
             # Obtaining TAU = min(TAUx, TAUy, (dt - sum_partial_times))
             TAUx = abs(TAUx)
@@ -1526,9 +1571,14 @@ class RiverFlowDynamics(Component):
         self._eta_at_links = self._grid.map_mean_of_link_nodes_to_link(self._eta)
 
         # Corner nodes treatment
-        self._eta[self.grid.corner_nodes] = np.mean(
-            self._eta[self._adjacent_nodes_at_corner_nodes], axis=1
-        )
+        # Store corner values to avoid processing order bias
+        corner_eta_values = []
+        for i, corner_node in enumerate(self.grid.corner_nodes):
+            adjacent_values = self._eta[self._adjacent_nodes_at_corner_nodes[i]]
+            corner_eta_values.append(np.mean(adjacent_values))
+
+        # Apply all corner updates simultaneously (no processing order bias)
+        self._eta[self.grid.corner_nodes] = corner_eta_values
 
         # Updating water velocity
         # tempB1 :  Considering only wet cells
@@ -1721,9 +1771,13 @@ class RiverFlowDynamics(Component):
         self._h = np.where(self._h < self._threshold_depth, 0, self._h)
 
         # Corner nodes treatment
-        self._h[self.grid.corner_nodes] = np.mean(
-            self._h[self._adjacent_nodes_at_corner_nodes], axis=1
-        )
+        corner_h_values = []
+        for i, corner_node in enumerate(self.grid.corner_nodes):
+            adjacent_values = self._h[self._adjacent_nodes_at_corner_nodes[i]]
+            corner_h_values.append(np.mean(adjacent_values))
+
+        # Apply all corner updates simultaneously
+        self._h[self.grid.corner_nodes] = corner_h_values
 
         # Updating wet nodes
         self._wet_nodes = np.where(self._h >= self._threshold_depth, True, False)
