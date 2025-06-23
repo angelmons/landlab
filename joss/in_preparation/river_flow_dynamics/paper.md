@@ -89,10 +89,7 @@ rfd = RiverFlowDynamics(
 for _ in range(100):
     rfd.run_one_step()
 ```	
-
-<div style="text-align: center;">
-<img src="water_surface_evolution.jpg" alt="Example model output showing the time evolution of the water surface elevation along a 1% slope channel. The simulation demonstrates how water progressively fills the channel from an initially dry state (t=0.0s) to steady-state flow conditions (t=6.0s), with the black line representing the channel bed and colored lines showing water surface profiles at different times." style="width: 75%;" />
-</div>
+![Figure 1: Example model output showing the time evolution of the water surface elevation along a 1% slope channel. The simulation demonstrates how water progressively fills the channel from an initially dry state (t=0.0s) to steady-state flow conditions (t=6.0s), with the black line representing the channel bed and colored lines showing water surface profiles at different times](water_surface_evolution.jpg)
 
 # Acknowledgements
 This research was supported by NSF EPSCoR (Award #2242769) and Chile's ANID FONDECYT Iniciación (Grant #11200949 to AM). Landlab development was funded by NSF (Awards #1147454, #1148305, #1450409, #1450338, #1450412) and the Community Surface Dynamics Modeling System (NSF Awards #1226297, #1831623).
