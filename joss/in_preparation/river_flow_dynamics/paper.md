@@ -36,7 +36,7 @@ bibliography: paper.bib
 ---
 # Summary
 
-Numerical modeling of surface water flow is a critical tool in hydrology, hydraulics, and environmental science. These models play a crucial role in predicting and analyzing flow patterns in rivers, flood plains, and coastal areas, informing decisions in water resource management, flood risk assessment, and ecosystem conservation. This paper introduces a novel two-dimensional flow model, RiverFlowDynamics, developed as a component of the Landlab Python Package [@hobley:2017;@barnhart:2020;@Hutton:2020;@Hutton:2020], designed to simulate the behavior of rivers and streams under various flow conditions over natural and artificial topography.
+RiverFlowDynamics enables researchers to simulate how water flows through rivers, streams, and flood plains using realistic physics. The software can predict water depths, flow velocities, and how water dynamics evolve over complex terrain, making it valuable for flood risk assessment, environmental studies, and water resource management. Numerical modeling of surface water flow is a critical tool in hydrology, hydraulics, and environmental science. These models play a crucial role in predicting and analyzing flow patterns in rivers, flood plains, and coastal areas, informing decisions in water resource management, flood risk assessment, and ecosystem conservation. This paper introduces a novel two-dimensional flow model, RiverFlowDynamics, developed as a component of the Landlab Python Package [@hobley:2017;@barnhart:2020;@Hutton:2020;@Hutton:2020], designed to simulate the behavior of rivers and streams under various flow conditions over natural and artificial topography.
 
 RiverFlowDynamics is founded on the depth-averaged Saint-Venant equations, also known as the shallow water equations [@casulli1990semi;@casulli_semi-implicit_1999]. These equations, derived from the Navier-Stokes equations for incompressible flow, are simplified by integrating over the water depth. This approach assumes that vertical accelerations are negligible compared to horizontal ones, a reasonable approximation for many surface water flows. The governing equations consist of continuity and momentum balance equations in two dimensions, capturing the essential dynamics of free-surface flows.
 
@@ -62,9 +62,46 @@ Source code for RiverFlowDynamics is available as part of the Landlab Python pac
 
 RiverFlowDynamics is a Python-based 2D flow model developed as a component of the Landlab framework, addressing a critical gap in the modeling of complex river systems and flood dynamics. Prior to RiverFlowDynamics, Landlab lacked a comprehensive 2D flow model capable of handling fully advective-dominated problems, particularly in rivers with complex topographies. This limitation hindered accurate simulations of diverse flow regimes and transitions crucial for advanced hydrological and environmental studies. The model's integration into Landlab's component framework enables future coupling with sediment transport components to simulate morphodynamic processes and assess impacts on aquatic habitat and riverine vegetation dynamics under changing flow conditions.
 
-Unlike commercial alternatives such as TELEMAC and Delft3D, RiverFlowDynamics provides an open-source, Python-based solution that is more accessible to researchers and educators while maintaining comparable numerical accuracy. RiverFlowDynamics solves the complete depth-averaged Saint-Venant equations, offering a significant advancement over existing Landlab components that typically use simplified equations like the kinematic wave approximation. This approach enables the model to capture complex flow dynamics, including subcritical and supercritical flows, hydraulic jumps, and intricate channel-floodplain interactions. The model's capabilities make it particularly valuable for a wide range of applications, from small-scale stream dynamics to large-scale flood simulations. It is design to be  applicable in scenarios involving rapid flood propagation in urban areas, detailed floodplain mapping, and the analysis of complex river morphodynamics in mountainous regions. By integrating RiverFlowDynamics into the Landlab framework, we provide researchers, students, and practitioners with a powerful, accessible tool for hydraulics modeling. This integration facilitates future modifications and contributions, ensuring the model's continual evolution to meet emerging challenges in river system analysis and flood risk assessment. Integration with Landlab leverages its established grid structure, visualization tools, and interoperability with other components, facilitating multi-process simulations and reducing development overhead
+Compared to existing hydraulic modeling software such as TELEMAC and Delft3D, RiverFlowDynamics offers unique advantages through its native Python implementation and integration with the Landlab framework, providing enhanced interoperability with other Earth surface process models and the broader scientific Python ecosystem while maintaining comparable numerical accuracy.. RiverFlowDynamics solves the complete depth-averaged Saint-Venant equations, offering a significant advancement over existing Landlab components that typically use simplified equations like the kinematic wave approximation. This approach enables the model to capture complex flow dynamics, including subcritical and supercritical flows, hydraulic jumps, and intricate channel-floodplain interactions. The model's capabilities make it particularly valuable for a wide range of applications, from small-scale stream dynamics to large-scale flood simulations. It is design to be  applicable in scenarios involving rapid flood propagation in urban areas, detailed floodplain mapping, and the analysis of complex river morphodynamics in mountainous regions. By integrating RiverFlowDynamics into the Landlab framework, we provide researchers, students, and practitioners with a powerful, accessible tool for hydraulics modeling. This integration facilitates future modifications and contributions, ensuring the model's continual evolution to meet emerging challenges in river system analysis and flood risk assessment. Integration with Landlab leverages its established grid structure, visualization tools, and interoperability with other components, facilitating multi-process simulations and reducing development overhead
+
+## Basic Usage Example
+
+RiverFlowDynamics integrates seamlessly with Landlab's grid structure. Here's a simple example demonstrating water flow in a rectangular channel:
+
+import numpy as np
+from landlab import RasterModelGrid
+from landlab.components import RiverFlowDynamics
+
+# Create grid and topography
+grid = RasterModelGrid((20, 60), xy_spacing=0.1)
+z = grid.add_zeros("topographic__elevation", at="node")
+z += 0.059 - 0.01 * grid.x_of_node
+z[grid.y_of_node > 1.5] = 1.0
+z[grid.y_of_node < 0.5] = 1.0
+
+# Initialize fields
+grid.add_zeros("surface_water__depth", at="node")
+grid.add_zeros("surface_water__velocity", at="link")
+wse = grid.add_zeros("surface_water__elevation", at="node")
+wse += z
+
+# Set boundary conditions
+fixed_entry_nodes = np.arange(300, 910, 60)
+fixed_entry_links = grid.links_at_node[fixed_entry_nodes][:, 0]
+
+# Run model
+rfd = RiverFlowDynamics(
+    grid,
+    fixed_entry_nodes=fixed_entry_nodes,
+    fixed_entry_links=fixed_entry_links,
+    entry_nodes_h_values=np.full(11, 0.5),
+    entry_links_vel_values=np.full(11, 0.45),
+)
+
+for _ in range(100):
+    rfd.run_one_step()
 
 # Acknowledgements
-This research was supported by NSF EPSCoR (Award #2242769 to AM) and Chile's ANID FONDECYT Iniciación (Grant #11200949 to AM). Landlab development was funded by NSF (Awards #1147454, #1148305, #1450409, #1450338, #1450412) and the Community Surface Dynamics Modeling System (NSF Awards #1226297, #1831623).
+This research was supported by NSF EPSCoR (Award #2242769) and Chile's ANID FONDECYT Iniciación (Grant #11200949 to AM). Landlab development was funded by NSF (Awards #1147454, #1148305, #1450409, #1450338, #1450412) and the Community Surface Dynamics Modeling System (NSF Awards #1226297, #1831623).
 
 # References
