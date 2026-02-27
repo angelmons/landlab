@@ -13,7 +13,7 @@ Reference values for the energy budget tests were computed by hand and
 cross-checked against published
 saturation-vapor-pressure tables (WMO, 2018).
 
-last updated: 02/23/2026
+last updated: 02/27/2026
 """
 
 import numpy as np
@@ -697,6 +697,27 @@ def test_longwave_cloud_cover():
     )
 
 
+def test_longwave_cloud_cover_full_overcast():
+    """Full overcast (C=1.0) must amplify longwave by exactly 1.17."""
+    grid_clear, rtd_clear = _make_grid_with_conditions(
+        Ta=25.0, RH=50.0, sigma_lw_factor=1.0
+    )
+    grid_cloud, rtd_cloud = _make_grid_with_conditions(
+        Ta=25.0, RH=50.0, sigma_lw_factor=1.0
+    )
+
+    grid_cloud.at_node["cloud_cover__fraction"][:] = 1.0
+
+    rtd_clear.atmospheric_net_heat_exchange(60.0)
+    rtd_cloud.atmospheric_net_heat_exchange(60.0)
+
+    core = grid_clear.core_nodes
+
+    # 1 + 0.17 * (1.0)^2 = 1.17
+    expected = rtd_clear.Q_lw_in[core[0]] * 1.17
+    np.testing.assert_allclose(rtd_cloud.Q_lw_in[core[0]], expected, rtol=1e-6)
+
+
 def test_bed_conduction_flux():
     """Warmer sediment bed should inject heat into the water column."""
     grid, rtd = _make_grid_with_conditions(Tw=20.0)
@@ -715,6 +736,79 @@ def test_bed_conduction_flux():
     assert grid.at_node["sediment__temperature"][core[0]] < 25.0
 
 
+def test_bed_conduction_exact_sediment_update():
+    """Verify the exact sediment temperature change from hand calculation.
+
+    Reference:
+        Q_bed = (k_bed / (0.5 * dz_bed)) * (T_bed - T_w)
+              = (1.5 / 0.25) * (25 - 20) = 30.0 W/m^2
+        dT_bed = -Q_bed * dt / (rho_bed * cp_bed * dz_bed)
+               = -30.0 * 60 / (1500 * 800 * 0.5) = -0.003 deg C
+        T_bed_new = 25.0 - 0.003 = 24.997 deg C
+    """
+    grid, rtd = _make_grid_with_conditions(Tw=20.0)
+    grid.at_node["sediment__temperature"][:] = 25.0
+
+    rtd.atmospheric_net_heat_exchange(60.0)
+
+    core = grid.core_nodes
+    np.testing.assert_allclose(
+        grid.at_node["sediment__temperature"][core], 24.997, rtol=1e-6
+    )
+
+
+def test_bed_conduction_sign_reversal():
+    """Cold bed (T_bed < T_w) must produce negative Q_bed (extracts heat).
+
+    Reference:
+        Q_bed = (1.5 / 0.25) * (15.0 - 20.0) = -30.0 W/m^2
+    """
+    grid, rtd = _make_grid_with_conditions(Tw=20.0)
+    grid.at_node["sediment__temperature"][:] = 15.0
+
+    rtd.atmospheric_net_heat_exchange(60.0)
+
+    core = grid.core_nodes
+    np.testing.assert_allclose(rtd.Q_bed[core], -30.0, rtol=1e-6)
+
+    # Bed must warm up (gained heat from water)
+    assert grid.at_node["sediment__temperature"][core[0]] > 15.0
+
+
+def test_bed_conduction_custom_properties():
+    """Custom k_bed and dz_bed must scale the flux correctly.
+
+    Reference (k_bed=3.0, dz_bed=1.0):
+        Q_bed = (3.0 / 0.5) * (25.0 - 20.0) = 30.0 W/m^2
+        (same magnitude as default, but from different parameters)
+    """
+    grid = _make_grid(nrows=5, ncols=8, dx=10.0)
+    grid.at_node["surface_water__depth"][:] = 0.5
+    grid.at_node["surface_water__temperature"][:] = 20.0
+    grid.at_node["air__temperature"][:] = 25.0
+    grid.at_node["air__relative_humidity"][:] = 50.0
+    grid.at_node["air__velocity"][:] = 2.0
+    grid.at_node["radiation__incoming_shortwave_flux"][:] = 800.0
+    grid.at_node["solar__altitude_angle"][:] = np.radians(60.0)
+    grid.at_node["cloud_cover__fraction"][:] = 0.0
+    grid.at_node["groundwater__specific_discharge"][:] = 0.0
+    grid.at_node["groundwater__temperature"][:] = 20.0
+    grid.at_node["sediment__temperature"][:] = 25.0
+
+    rtd = RiverTemperatureDynamics(
+        grid,
+        shade_factor=0.3,
+        sigma_lw_factor=1.0,
+        k_bed=3.0,
+        dz_bed=1.0,
+    )
+    rtd.atmospheric_net_heat_exchange(60.0)
+
+    core = grid.core_nodes
+    # Q_bed = (3.0 / (0.5 * 1.0)) * (25.0 - 20.0) = 30.0
+    np.testing.assert_allclose(rtd.Q_bed[core], 30.0, rtol=1e-6)
+
+
 def test_groundwater_exchange_flux():
     """Cold groundwater discharge should extract heat from the water column."""
     grid, rtd = _make_grid_with_conditions(Tw=20.0)
@@ -729,6 +823,36 @@ def test_groundwater_exchange_flux():
     # Q_gw = rho * cp * q_gw * (T_gw - T)
     expected_Q_gw = 1000.0 * 4186.0 * 1e-5 * (10.0 - 20.0)  # -418.6 W/m^2
     np.testing.assert_allclose(rtd.Q_gw[core], expected_Q_gw, rtol=1e-6)
+
+
+def test_groundwater_warm_inflow():
+    """Warm groundwater (T_gw > T_w) must produce positive Q_gw (adds heat).
+
+    Reference:
+        Q_gw = 1000 * 4186 * 1e-5 * (25 - 20) = +209.3 W/m^2
+    """
+    grid, rtd = _make_grid_with_conditions(Tw=20.0)
+    grid.at_node["groundwater__temperature"][:] = 25.0
+    grid.at_node["groundwater__specific_discharge"][:] = 1e-5
+
+    rtd.atmospheric_net_heat_exchange(60.0)
+
+    core = grid.core_nodes
+    expected = 1000.0 * 4186.0 * 1e-5 * (25.0 - 20.0)
+    np.testing.assert_allclose(rtd.Q_gw[core], expected, rtol=1e-6)
+    assert rtd.Q_gw[core[0]] > 0, "Warm GW must add heat"
+
+
+def test_groundwater_zero_discharge():
+    """Zero specific discharge must produce zero groundwater flux."""
+    grid, rtd = _make_grid_with_conditions(Tw=20.0)
+    grid.at_node["groundwater__temperature"][:] = 5.0  # very cold
+    grid.at_node["groundwater__specific_discharge"][:] = 0.0  # but no flow
+
+    rtd.atmospheric_net_heat_exchange(60.0)
+
+    core = grid.core_nodes
+    np.testing.assert_allclose(rtd.Q_gw[core], 0.0, atol=1e-15)
 
 
 def test_dynamic_meteorology_from_file(tmp_path):
@@ -759,6 +883,93 @@ def test_dynamic_meteorology_from_file(tmp_path):
     # Verify the atmospheric fields were updated correctly via interpolation
     np.testing.assert_allclose(grid.at_node["air__temperature"][core], 15.0)
     np.testing.assert_allclose(grid.at_node["cloud_cover__fraction"][core], 0.5)
+
+
+def test_dynamic_meteorology_interpolation_midpoint(tmp_path):
+    """Verify linear interpolation between data points for all five fields.
+
+    At t=1800 s (midpoint of [0, 3600]):
+        T_air = 12.5, RH = 52.5, u_wind = 1.5, Q_sw = 200.0, cloud = 0.25
+    """
+    import pandas as pd
+
+    df = pd.DataFrame(
+        {
+            "time_sec": [0, 3600, 7200],
+            "T_air": [10.0, 15.0, 20.0],
+            "RH": [50.0, 55.0, 60.0],
+            "u_wind": [1.0, 2.0, 3.0],
+            "Q_sw": [0.0, 400.0, 800.0],
+            "cloud_cover": [0.0, 0.5, 1.0],
+        }
+    )
+    csv_path = tmp_path / "met_data.csv"
+    df.to_csv(csv_path, index=False)
+
+    grid = _make_grid()
+    rtd = RiverTemperatureDynamics(grid, met_file=str(csv_path), k_bed=0.0)
+
+    rtd.run_one_step(60.0, t_sim=1800.0)
+
+    core = grid.core_nodes
+    np.testing.assert_allclose(grid.at_node["air__temperature"][core], 12.5)
+    np.testing.assert_allclose(grid.at_node["air__relative_humidity"][core], 52.5)
+    np.testing.assert_allclose(grid.at_node["air__velocity"][core], 1.5)
+    np.testing.assert_allclose(
+        grid.at_node["radiation__incoming_shortwave_flux"][core], 200.0
+    )
+    np.testing.assert_allclose(grid.at_node["cloud_cover__fraction"][core], 0.25)
+
+
+def test_net_heat_balance_all_terms_active():
+    """Net balance must close when cloud, bed, and GW terms are all active.
+
+    Uses baseline conditions plus:
+        C_cloud = 0.5, T_bed = 25.0, T_gw = 10.0, q_gw = 1e-5 m/s
+    """
+    grid, rtd = _make_grid_with_conditions(
+        Tw=20.0,
+        Ta=25.0,
+        RH=50.0,
+        wind=2.0,
+        Q_sw=800.0,
+        alt_deg=60.0,
+        shade=0.3,
+        sigma_lw_factor=1.0,
+    )
+
+    # Activate all new physics
+    grid.at_node["cloud_cover__fraction"][:] = 0.5
+    grid.at_node["sediment__temperature"][:] = 25.0
+    grid.at_node["groundwater__temperature"][:] = 10.0
+    grid.at_node["groundwater__specific_discharge"][:] = 1e-5
+
+    rtd.atmospheric_net_heat_exchange(60.0)
+
+    core = grid.core_nodes
+
+    # Algebraic closure: Q_net must equal sum of parts
+    expected_net = (
+        rtd.Q_sw_net[core]
+        + (rtd.Q_lw_in[core] - rtd.Q_lw_reflected[core])
+        - rtd.Q_lw_out[core]
+        - rtd.Q_conv[core]
+        - rtd.Q_evap[core]
+        + rtd.Q_bed[core]
+        + rtd.Q_gw[core]
+    )
+    np.testing.assert_allclose(rtd.Q_net[core], expected_net, rtol=1e-12)
+
+    # Verify individual new terms have expected values
+    np.testing.assert_allclose(rtd.Q_bed[core], 30.0, rtol=1e-6)
+    expected_gw = 1000.0 * 4186.0 * 1e-5 * (10.0 - 20.0)
+    np.testing.assert_allclose(rtd.Q_gw[core], expected_gw, rtol=1e-6)
+
+    # Cloud factor must have shifted Q_lw_in upward vs clear-sky
+    _, rtd_clear = _make_grid_with_conditions(Ta=25.0, RH=50.0, sigma_lw_factor=1.0)
+    rtd_clear.atmospheric_net_heat_exchange(60.0)
+    ratio = rtd.Q_lw_in[core[0]] / rtd_clear.Q_lw_in[core[0]]
+    np.testing.assert_allclose(ratio, 1.0425, rtol=1e-6)
 
 
 # ======================================================================
