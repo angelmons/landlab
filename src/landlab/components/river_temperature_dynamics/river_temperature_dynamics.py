@@ -122,7 +122,7 @@ class RiverTemperatureDynamics(Component):
         Minimum depth used to prevent division by zero in the heat budget [m].
         Default: 0.01
     sigma_lw_factor : float, optional
-        Multiplicative correction on the Stefan-Boltzmann constant. Default: 1.159
+        Correction factor of longwave radiationt. Default: 1.0
     alpha_L : float, optional
         Longitudinal dispersion scaling coefficient. Default: 10.0
     alpha_T : float, optional
@@ -271,7 +271,7 @@ class RiverTemperatureDynamics(Component):
         rug_terreno=0.01,
         wind_adj=1.0,
         h_min=0.01,
-        sigma_lw_factor=1.159,
+        sigma_lw_factor=1.0,
         alpha_L=10.0,
         alpha_T=0.6,
         ustar_fraction=0.1,
@@ -517,11 +517,11 @@ class RiverTemperatureDynamics(Component):
         e_sat_air_mmHg = self._vapor_pressure_mmHg(Ta)
         e_air_mmHg = e_sat_air_mmHg * RH / 100.0
         eps_a = 0.7 + 0.031 * np.sqrt(e_air_mmHg)
-        sigma_eff = self._sigma * self._sigma_lw_factor
 
         # Apply cloud cover adjustment (1 + 0.17 * C^2)
         cloud_factor = 1.0 + 0.17 * (C_cloud**2)
-        Q_lw_in = eps_a * sigma_eff * (Ta + 273.15) ** 4 * cloud_factor
+        Q_lw_in = self._sigma_lw_factor * \
+            (eps_a * self._sigma * (Ta + 273.15) ** 4 * cloud_factor)
 
         # 3. Longwave reflected
         Q_lw_reflected = 0.03 * Q_lw_in
