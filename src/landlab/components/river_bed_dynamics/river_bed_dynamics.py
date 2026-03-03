@@ -846,7 +846,7 @@ class RiverBedDynamics(Component):
             Controls how the diffusion coefficient D [m²/s] is determined.
             Options:
 
-            * ``'nonlinear'`` — D = |qb| / μ, where qb is the local bedload
+            * ``'nonlinear'`` — D = abs(qb) / μ, where qb is the local bedload
               transport rate per unit width and μ is the Talmon friction
               parameter ``bed_diffusion_mu``. D is zero wherever there is no
               transport, which is physically consistent.
@@ -870,7 +870,7 @@ class RiverBedDynamics(Component):
             If ``True`` (default), emits a ``UserWarning`` inside
             :meth:`update_bed_elevation` when the advective Exner CFL number
             exceeds 1.  The stability limit is
-            Δt ≤ (1-λp)·Δx_min / |qb_max|.  Suppressed when
+            Δt ≤ (1-λp)·Δx_min / abs(qb_max).  Suppressed when
             ``adaptive_dt=True`` (which enforces the limit automatically).
         adaptive_dt : bool, optional
             If ``True``, :meth:`run_one_step` computes the CFL-safe time step
