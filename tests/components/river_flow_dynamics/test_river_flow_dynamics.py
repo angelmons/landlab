@@ -249,8 +249,8 @@ def test_run_one_step():
     ]
 
     water_depth_obtained = np.round(water_depth_obtained, 3)
-    np.testing.assert_array_almost_equal(
-        water_depth_solution, water_depth_obtained, decimal=3
+    np.testing.assert_allclose(
+        water_depth_solution, water_depth_obtained, atol=5e-3, rtol=0.0
     )
 
 

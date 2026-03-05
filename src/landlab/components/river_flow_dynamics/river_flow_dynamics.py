@@ -83,6 +83,13 @@ And the velocity at links along the center of the channel.
 >>> np.round(flow_velocity, 3)
 array([0.45 , 0.457, 0.455, 0.452, 0.453])
 
+
+Compared to the previous version published on JOSS, the current version
+includes:
+- Cached raster link adjacency tables (O(1) neighbor lookup)
+- O(1) nearest-link mapping on raster grids
+- Robust, fast raster-alignment checks in pathline tracing
+- Sparse core-only pressure correction solve (PCG + Jacobi preconditioner)
 """
 
 import numpy as np
@@ -100,9 +107,9 @@ class RiverFlowDynamics(Component):
 
     References
     ----------
-    **Required Software Citation(s) Specific to this Component**
-
-    None Listed
+    Monsalve et al., (2025). RiverFlowDynamics v1.0: A Landlab component for computing two-
+    dimensional river flow dynamics. Journal of Open Source Software, 10(110), 7823, https://
+    doi.org/10.21105/joss.07823
 
     **Additional References**
 
@@ -220,6 +227,9 @@ class RiverFlowDynamics(Component):
             Speed of water flow at links above the surface at time N-1 [m/s].
         """
         super().__init__(grid)
+
+        # Precompute raster-grid lookup tables used throughout the component
+        self._build_raster_link_tables()
 
         # User inputs
         self._dt = dt
@@ -382,196 +392,119 @@ class RiverFlowDynamics(Component):
         )
 
     # Defining some functions
-    def find_nearest_link(self, x_coordinates, y_coordinates, objective_links="all"):
-        """Link nearest a point.
 
-        Find the index to the link nearest the given x, y coordinates.
-        Returns the indices of the links nearest the given coordinates.
+    # -------------------------------------------------------------------------
+    # Raster-grid lookup tables (speed-ups)
+    # -------------------------------------------------------------------------
+    def _build_raster_link_tables(self):
+        """Precompute fast lookup tables for RasterModelGrid link operations.
 
+        These tables make neighbor queries and nearest-link searches O(1) using
+        simple index arithmetic (no coordinate searching / no large temporary arrays).
         """
-        # Defining the set of links that are going to be used
-        if objective_links == "all":
-            objective_links = np.arange(self._grid.number_of_links)
-        elif objective_links == "horizontal":
-            objective_links = self.grid.horizontal_links
-        elif objective_links == "vertical":
-            objective_links = self.grid.vertical_links
-        # if (objective_links == "all") END
+        nrows, ncols = self.grid.shape
+        self._nrows = int(nrows)
+        self._ncols = int(ncols)
+        self._dx = float(self.grid.dx)
+        self._dy = float(self.grid.dy)
+        self._x0 = float(self.grid.x_of_node.min())
+        self._y0 = float(self.grid.y_of_node.min())
 
-        # Coordinates of all the RasterModelGrid links
-        x_of_objective_links = np.unique(self._grid.xy_of_link[objective_links][:, 0])
-        y_of_objective_links = np.unique(self._grid.xy_of_link[objective_links][:, 1])
+        # Reshaped link-id tables for arithmetic lookup
+        self._hlink_id = self.grid.horizontal_links.reshape((nrows, ncols - 1))
+        self._vlink_id = self.grid.vertical_links.reshape((nrows - 1, ncols))
 
-        # Getting the closest link-coordinate to the exit point
-        tempCalc1 = np.repeat(x_coordinates, len(x_of_objective_links)).reshape(
-            len(x_coordinates), len(x_of_objective_links)
+        # Adjacent links (same orientation): columns are [E, N, W, S]
+        self._adj_hlinks = np.full((self.grid.number_of_links, 4), -1, dtype=int)
+        self._adj_vlinks = np.full((self.grid.number_of_links, 4), -1, dtype=int)
+
+        # Horizontal-link adjacency
+        h = self._hlink_id
+        # East/West
+        self._adj_hlinks[h[:, :-1].ravel(), 0] = h[:, 1:].ravel()  # E
+        self._adj_hlinks[h[:, 1:].ravel(), 2] = h[:, :-1].ravel()  # W
+        # North/South (row shifts)
+        if nrows > 1:
+            self._adj_hlinks[h[:-1, :].ravel(), 1] = h[1:, :].ravel()  # N
+            self._adj_hlinks[h[1:, :].ravel(), 3] = h[:-1, :].ravel()  # S
+
+        # Vertical-link adjacency
+        v = self._vlink_id
+        # East/West
+        self._adj_vlinks[v[:, :-1].ravel(), 0] = v[:, 1:].ravel()  # E
+        self._adj_vlinks[v[:, 1:].ravel(), 2] = v[:, :-1].ravel()  # W
+        # North/South
+        if (nrows - 1) > 1:
+            self._adj_vlinks[v[:-1, :].ravel(), 1] = v[1:, :].ravel()  # N
+            self._adj_vlinks[v[1:, :].ravel(), 3] = v[:-1, :].ravel()  # S
+
+    def _is_on_link_x(self, x):
+        """Return boolean mask: x aligns with raster link x-coordinates."""
+        x = np.asarray(x, dtype=float)
+        tol = 10.0 * np.finfo(float).eps * max(self._dx, self._dy)
+        fx = ((x - self._x0) / self._dx) % 1.0
+        return (
+            (np.abs(fx - 0.0) < tol / self._dx)
+            | (np.abs(fx - 0.5) < tol / self._dx)
+            | (np.abs(fx - 1.0) < tol / self._dx)
         )
-        tempCalc2 = np.tile(x_of_objective_links, len(x_coordinates)).reshape(
-            len(x_coordinates), len(x_of_objective_links)
+
+    def _is_on_link_y(self, y):
+        """Return boolean mask: y aligns with raster link y-coordinates."""
+        y = np.asarray(y, dtype=float)
+        tol = 10.0 * np.finfo(float).eps * max(self._dx, self._dy)
+        fy = ((y - self._y0) / self._dy) % 1.0
+        return (
+            (np.abs(fy - 0.0) < tol / self._dy)
+            | (np.abs(fy - 0.5) < tol / self._dy)
+            | (np.abs(fy - 1.0) < tol / self._dy)
         )
-        indices = abs(tempCalc2 - tempCalc1).argmin(axis=1)
-        nearest_x = x_of_objective_links[indices]
 
-        tempCalc1 = np.repeat(y_coordinates, len(y_of_objective_links)).reshape(
-            len(y_coordinates), len(y_of_objective_links)
+    def find_nearest_link(self, x_coordinates, y_coordinates, objective_links="all"):
+        """Return the nearest link IDs for points on a RasterModelGrid.
+
+        Notes
+        -----
+        This implementation is O(1) per point using index arithmetic.
+        It is intended for objective_links in {"horizontal", "vertical"}.
+        """
+        x = np.asarray(x_coordinates, dtype=float)
+        y = np.asarray(y_coordinates, dtype=float)
+
+        dx, dy = self._dx, self._dy
+        x0, y0 = self._x0, self._y0
+
+        if objective_links == "horizontal":
+            # Horizontal link centers at (x0 + (c + 0.5)*dx, y0 + r*dy)
+            r = np.rint((y - y0) / dy).astype(int)
+            c = np.rint((x - (x0 + 0.5 * dx)) / dx).astype(int)
+            r = np.clip(r, 0, self._nrows - 1)
+            c = np.clip(c, 0, self._ncols - 2)
+            return self._hlink_id[r, c].astype(int)
+
+        if objective_links == "vertical":
+            # Vertical link centers at (x0 + c*dx, y0 + (r + 0.5)*dy)
+            r = np.rint((y - (y0 + 0.5 * dy)) / dy).astype(int)
+            c = np.rint((x - x0) / dx).astype(int)
+            r = np.clip(r, 0, self._nrows - 2)
+            c = np.clip(c, 0, self._ncols - 1)
+            return self._vlink_id[r, c].astype(int)
+
+        raise ValueError(
+            "objective_links must be 'horizontal' or 'vertical' for fast lookup"
         )
-        tempCalc2 = np.tile(y_of_objective_links, len(y_coordinates)).reshape(
-            len(y_coordinates), len(y_of_objective_links)
-        )
-        indices = abs(tempCalc2 - tempCalc1).argmin(axis=1)
-        nearest_y = y_of_objective_links[indices]
-
-        # Getting the closest link to link
-        tempCalc1 = np.repeat(
-            nearest_x, len(self._grid.xy_of_link[objective_links][:, 0])
-        ).reshape(len(nearest_x), len(self._grid.xy_of_link[objective_links][:, 0]))
-        tempCalc2 = np.tile(
-            self._grid.xy_of_link[objective_links][:, 0], len(x_coordinates)
-        ).reshape(len(x_coordinates), len(self._grid.xy_of_link[objective_links][:, 0]))
-        tempB1 = tempCalc1 == tempCalc2
-
-        tempCalc1 = np.repeat(
-            nearest_y, len(self._grid.xy_of_link[objective_links][:, 1])
-        ).reshape(len(nearest_y), len(self._grid.xy_of_link[objective_links][:, 1]))
-        tempCalc2 = np.tile(
-            self._grid.xy_of_link[objective_links][:, 1], len(y_coordinates)
-        ).reshape(len(y_coordinates), len(self._grid.xy_of_link[objective_links][:, 1]))
-        tempB2 = tempCalc1 == tempCalc2
-
-        tempCalc3 = (
-            np.repeat(objective_links, len(x_coordinates))
-            .reshape((len(objective_links), len(y_coordinates)))
-            .T
-        )
-        nearest_link = tempCalc3[tempB1 * tempB2]
-
-        return nearest_link.astype(int)
 
     def find_adjacent_links_at_link(self, current_link, objective_links="horizontal"):
-        """Get adjacent links to the link.
+        """Adjacent links to each link ID (E, N, W, S).
 
-        This function finds the links at right, above, left and below the given link.
-        Similar purpose to the "adjacent_nodes_at_node" function.
-        Return the adjacent links in as many rows as given links.
-        Link IDs are returned as columns in clock-wise order starting from East (E, N, W, S).
-
+        This is a fast table lookup replacement for the older coordinate-search version.
         """
-
-        # Defining the set of links that are going to be used
+        links = np.asarray(current_link, dtype=int)
         if objective_links == "horizontal":
-            objective_links = self.grid.horizontal_links
-            reshape_pair = (self.grid.shape[0], self.grid.shape[1] - 1)
-        elif objective_links == "vertical":
-            objective_links = self.grid.vertical_links
-            reshape_pair = (self.grid.shape[0] - 1, self.grid.shape[1])
-        # if (objective_links == "horizontal") END
-
-        # Coordinates of the current link
-        x_of_current_links = self._grid.xy_of_link[current_link][:, 0]
-        y_of_current_links = self._grid.xy_of_link[current_link][:, 1]
-
-        # Coordinates of all the RasterModelGrid links
-        x_of_objective_links = np.unique(self._grid.xy_of_link[objective_links][:, 0])
-        y_of_objective_links = np.unique(self._grid.xy_of_link[objective_links][:, 1])
-
-        # Getting links that share the same y-coordinates
-        # The following matrices are built to be compared to each other.
-        # tempCalc1 repeats "y_of_current_links" for every x-coordinate in
-        # "objective_links": cols = "y_of_current_links"
-        # tempCalc2 repeats "y_of_objective_links" for every x-coordinate in
-        # the "current_link": rows = "y_of_objective_links"
-        # tempCalc3 give us the index to extract all the objective links that
-        # are located in the same row than the current link: rows = [0, 1, 2, ...]
-        tempCalc1 = np.repeat(y_of_current_links, len(y_of_objective_links)).reshape(
-            len(y_of_current_links), len(y_of_objective_links)
-        )
-        tempCalc2 = np.tile(y_of_objective_links, len(y_of_current_links)).reshape(
-            len(y_of_current_links), len(y_of_objective_links)
-        )
-        tempCalc3 = (
-            np.repeat(np.arange(len(y_of_objective_links)), len(y_of_current_links))
-            .reshape(len(y_of_objective_links), len(y_of_current_links))
-            .T
-        )
-
-        indices = tempCalc3[tempCalc1 == tempCalc2]
-        links_at_same_rows = objective_links.reshape(reshape_pair)[indices, :]
-        links_at_same_rows = np.append(
-            np.array([-np.ones_like(current_link)]).T, links_at_same_rows, axis=1
-        )
-        links_at_same_rows = np.append(
-            links_at_same_rows, np.array([-np.ones_like(current_link)]).T, axis=1
-        )
-
-        # Getting links that share the same x-coordinates
-        # The following matrices are built to be compared to each other.
-        # tempCalc1 repeats "x_of_current_links" for every x-coordinate in
-        # "objective_links": cols = "x_of_current_links"
-        # tempCalc2 repeats "x_of_objective_links" for every x-coordinate in
-        # the "current_link": rows = "x_of_objective_links"
-        # tempCalc3 give us the index to extract all the objective links that
-        # are located in the same row than the current link: rows = [0, 1, 2, ...]
-        tempCalc1 = np.repeat(x_of_current_links, len(x_of_objective_links)).reshape(
-            len(x_of_current_links), len(x_of_objective_links)
-        )
-        tempCalc2 = np.tile(x_of_objective_links, len(x_of_current_links)).reshape(
-            len(x_of_current_links), len(x_of_objective_links)
-        )
-        tempCalc3 = (
-            np.repeat(np.arange(len(x_of_objective_links)), len(x_of_current_links))
-            .reshape(len(x_of_objective_links), len(x_of_current_links))
-            .T
-        )
-
-        indices = tempCalc3[tempCalc1 == tempCalc2]
-        links_at_same_cols = objective_links.reshape(reshape_pair)[:, indices].T
-        links_at_same_cols = np.append(
-            np.array([-np.ones_like(current_link)]).T, links_at_same_cols, axis=1
-        )
-        links_at_same_cols = np.append(
-            links_at_same_cols, np.array([-np.ones_like(current_link)]).T, axis=1
-        )
-
-        # Extracing the adjacent links to current link (E,N,W,S)
-        adjacent_links_at_link = np.zeros((current_link.shape[0], 4))
-
-        # Rows (E,W)
-        tempCalc1 = np.repeat(current_link, links_at_same_rows.shape[1]).reshape(
-            current_link.shape[0], links_at_same_rows.shape[1]
-        )
-        tempCalc2 = (
-            np.repeat(np.arange(links_at_same_rows.shape[1]), current_link.shape[0])
-            .reshape(links_at_same_rows.shape[1], current_link.shape[0])
-            .T
-        )
-        tempCalc3 = tempCalc2[tempCalc1 == links_at_same_rows]
-
-        adjacent_links_at_link[:, 0] = links_at_same_rows[
-            (range(links_at_same_rows.shape[0])), (tempCalc3 + 1)
-        ]
-        adjacent_links_at_link[:, 2] = links_at_same_rows[
-            (range(links_at_same_rows.shape[0])), (tempCalc3 - 1)
-        ]
-
-        # Cols (N,S)
-        tempCalc1 = np.repeat(current_link, links_at_same_cols.shape[1]).reshape(
-            current_link.shape[0], links_at_same_cols.shape[1]
-        )
-        tempCalc2 = (
-            np.repeat(np.arange(links_at_same_cols.shape[1]), current_link.shape[0])
-            .reshape(links_at_same_cols.shape[1], current_link.shape[0])
-            .T
-        )
-        tempCalc3 = tempCalc2[tempCalc1 == links_at_same_cols]
-
-        adjacent_links_at_link[:, 1] = links_at_same_cols[
-            (range(links_at_same_cols.shape[0])), (tempCalc3 + 1)
-        ]
-        adjacent_links_at_link[:, 3] = links_at_same_cols[
-            (range(links_at_same_cols.shape[0])), (tempCalc3 - 1)
-        ]
-
-        return adjacent_links_at_link.astype(int)
+            return self._adj_hlinks[links]
+        if objective_links == "vertical":
+            return self._adj_vlinks[links]
+        raise ValueError("objective_links must be 'horizontal' or 'vertical'")
 
     def path_line_tracing(self):
         """ " Path line tracing algorithm.
@@ -607,16 +540,12 @@ class RiverFlowDynamics(Component):
             )
 
             # Checking if the particles departs (backwards) from a link position (True)
-            tempBx = np.isin(
-                self._x_of_particle, self._grid.xy_of_link[self.grid.active_links][:, 0]
-            )  # Particles located on horizontal-links/vertical-faces
-            tempBy = np.isin(
-                self._y_of_particle, self._grid.xy_of_link[self.grid.active_links][:, 1]
-            )  # Particles located on vertical-links/horizontal-faces
+            tempBx = self._is_on_link_x(self._x_of_particle)
+            tempBy = self._is_on_link_y(self._y_of_particle)
 
-            # True, particles depart from link positions.
-            # False, particles depart from random locations inside a cell
-            tempBxy = tempBx + tempBy
+            # True: particles depart from link-aligned positions.
+            # False: particles depart from interior cell locations.
+            tempBxy = tempBx | tempBy
 
             # Getting surrounding links for particles located inside a cell
             tempCalc1 = np.append(
@@ -948,7 +877,7 @@ class RiverFlowDynamics(Component):
         # Path line tracing
         # U-velocity, x-direction, horizontal links
         # Getting the initial particle location at each volume faces
-        tempB1 = [i in self.grid.horizontal_links for i in self.grid.active_links]
+        tempB1 = np.isin(self.grid.active_links, self.grid.horizontal_links)
         self._x_of_particle = self._grid.xy_of_link[:, 0][self.grid.active_links][
             tempB1
         ]
@@ -1352,114 +1281,123 @@ class RiverFlowDynamics(Component):
         # Solving semi-implicit scheme with PCG method
         # Building the system of equations 'A*x=b'
         # Full 'A' matrix with all nodes on it
-        A = np.zeros((self.grid.number_of_nodes, self.grid.number_of_nodes))
-        b = self.grid.zeros(at="node")  # Full 'b' vector with all nodes on it
 
-        # Getting surrounding locations for core nodes
-        adjacent_nodes = self._grid.adjacent_nodes_at_node[
-            self.grid.core_nodes
-        ]  # East, North, West, South
-        adjacent_links = self._grid.links_at_node[
-            self.grid.core_nodes
-        ]  # East, North, West, South
-        nodes_location = np.append(
-            adjacent_nodes, np.array([self.grid.core_nodes]).T, axis=1
-        )  # East, North, West, South, Center
+        # Solving semi-implicit scheme with PCG method
+        # Building the sparse system of equations 'LHS * eta_core = RHS'
+        core = self.grid.core_nodes
+        n_core = core.size
 
-        # Boolean to differentiate between core and boundary nodes
-        tempB1 = np.isin(nodes_location, self.grid.core_nodes)
-        # Core node if tempB1 == True, boundary node if tempB1 == False
-        tempB2 = ~tempB1
-        # Boundary node if tempB2 == True, core node if tempB2 == False
+        # Surrounding locations for core nodes (E, N, W, S)
+        adjacent_nodes = self._grid.adjacent_nodes_at_node[core]  # shape (n_core, 4)
+        adjacent_links = self._grid.links_at_node[core]  # shape (n_core, 4)
 
-        ## Building 'b' for the right-hand side of the system
-        # Calculating 'delta' to build 'b'
-        tempCalc1 = (
+        # ---------------------------------------------------------------------
+        # Build RHS (core nodes only)
+        # ---------------------------------------------------------------------
+        # Flux divergence term (explicit part)
+        tmp_flux = (
             self._h_at_N_at_links[adjacent_links] * self._vel_at_N[adjacent_links]
         )
-        tempCalc2 = (
-            self._eta_at_N[self.grid.core_nodes]
-            - (1 - self._theta) * self._dt / dx * (tempCalc1[:, 0] - tempCalc1[:, 2])
-            - (1 - self._theta) * self._dt / dy * (tempCalc1[:, 1] - tempCalc1[:, 3])
+        eta_star = (
+            self._eta_at_N[core]
+            - (1 - self._theta) * self._dt / dx * (tmp_flux[:, 0] - tmp_flux[:, 2])
+            - (1 - self._theta) * self._dt / dy * (tmp_flux[:, 1] - tmp_flux[:, 3])
         )
 
-        tempCalc1 = (
+        # Gravity/friction term
+        tmp_g = (
             self._h_at_N_at_links[adjacent_links]
             * self._g_links[adjacent_links]
             / self._a_links[adjacent_links]
         )
-        b[self.grid.core_nodes] = (
-            tempCalc2
-            - self._theta * self._dt / dx * (tempCalc1[:, 0] - tempCalc1[:, 2])
-            - self._theta * self._dt / dy * (tempCalc1[:, 1] - tempCalc1[:, 3])
+        rhs = (
+            eta_star
+            - self._theta * self._dt / dx * (tmp_g[:, 0] - tmp_g[:, 2])
+            - self._theta * self._dt / dy * (tmp_g[:, 1] - tmp_g[:, 3])
         )
 
-        ## Building 'A' for the left-hand side of the system
-        # Calculating coefficients for the system of equations
-        tempCalc1 = (
+        # ---------------------------------------------------------------------
+        # Build LHS (5-point stencil) as a sparse CSR matrix on core nodes
+        # ---------------------------------------------------------------------
+        tmp_c = (
             self._h_at_N_at_links[adjacent_links] ** 2 / self._a_links[adjacent_links]
         )
-        coefficients = [
-            -tempCalc1[:, 0] * (self._g * self._theta * self._dt / dx) ** 2,
-            -tempCalc1[:, 1] * (self._g * self._theta * self._dt / dy) ** 2,
-            -tempCalc1[:, 2] * (self._g * self._theta * self._dt / dx) ** 2,
-            -tempCalc1[:, 3] * (self._g * self._theta * self._dt / dy) ** 2,
+        cE = -tmp_c[:, 0] * (self._g * self._theta * self._dt / dx) ** 2
+        cN = -tmp_c[:, 1] * (self._g * self._theta * self._dt / dy) ** 2
+        cW = -tmp_c[:, 2] * (self._g * self._theta * self._dt / dx) ** 2
+        cS = -tmp_c[:, 3] * (self._g * self._theta * self._dt / dy) ** 2
+        cC = (
             1
-            + (tempCalc1[:, 0] + tempCalc1[:, 2])
-            * (self._g * self._theta * self._dt / dx) ** 2
-            + (tempCalc1[:, 1] + tempCalc1[:, 3])
-            * (self._g * self._theta * self._dt / dy) ** 2,
+            + (tmp_c[:, 0] + tmp_c[:, 2]) * (self._g * self._theta * self._dt / dx) ** 2
+            + (tmp_c[:, 1] + tmp_c[:, 3]) * (self._g * self._theta * self._dt / dy) ** 2
+        )
+
+        # Map global node ids -> [0..n_core-1] indices; non-core = -1
+        core_index = np.full(self.grid.number_of_nodes, -1, dtype=int)
+        core_index[core] = np.arange(n_core, dtype=int)
+
+        # Prepare sparse triplets
+        row = np.arange(n_core, dtype=int)
+
+        rows = [row, row, row, row, row]
+        cols = [
+            core_index[adjacent_nodes[:, 0]],
+            core_index[adjacent_nodes[:, 1]],
+            core_index[adjacent_nodes[:, 2]],
+            core_index[adjacent_nodes[:, 3]],
+            row,
         ]
-        coefficients = np.array(coefficients).T
+        data = [cE, cN, cW, cS, cC]
 
-        ## For loop iterates through every row of 'nodes_location' to:
-        # a) find the node number (row in A) and choose an equation, and
-        # b) find the columns associated with adjacent nodes
-        for row in range(nodes_location.shape[0]):
-            # Getting the current node
-            current_node = nodes_location[row, 4]
-            # Getting the row associated with the current node
-            current_rows_in_A = np.array([current_node])
-            # Getting the columns associated with surrounding nodes
-            current_cols_in_A = nodes_location[row, :]
+        # Move boundary-neighbor contributions to RHS
+        for j, cj in enumerate([cE, cN, cW, cS]):
+            nbr = adjacent_nodes[:, j]
+            is_boundary = core_index[nbr] < 0
+            if np.any(is_boundary):
+                rhs[is_boundary] -= cj[is_boundary] * self._eta_at_N[nbr[is_boundary]]
 
-            # Filling A matrix with coefficients associated with surrounding nodes
-            A[np.ix_(current_rows_in_A, current_cols_in_A)] = (
-                coefficients[row, :] * tempB1[row, :]
-            )
+        # Keep only core-neighbor entries in the sparse matrix
+        rows_coo = []
+        cols_coo = []
+        data_coo = []
+        for r_arr, c_arr, d_arr in zip(rows, cols, data):
+            valid = c_arr >= 0
+            rows_coo.append(r_arr[valid])
+            cols_coo.append(c_arr[valid])
+            data_coo.append(d_arr[valid])
 
-            # Adding known terms (boundary nodes) to the right-hand side of the equation
-            b[current_rows_in_A] = b[current_rows_in_A] - sum(
-                self._eta_at_N[nodes_location[row, :]]
-                * coefficients[row, :]
-                * tempB2[row, :]
-            )
-        # for END
+        rows_coo = np.concatenate(rows_coo)
+        cols_coo = np.concatenate(cols_coo)
+        data_coo = np.concatenate(data_coo)
 
-        # Extracting only core nodes to be solved
-        left_hand_side = A[np.ix_(self.grid.core_nodes, self.grid.core_nodes)]
-        right_hand_side = b[self.grid.core_nodes]
+        left_hand_side = sp.sparse.coo_matrix(
+            (data_coo, (rows_coo, cols_coo)), shape=(n_core, n_core)
+        ).tocsr()
 
-        # Applying PCG method to 'LHS*eta=RHS' using np.diag() as a preconditioner for 'LHS'
-        # Preconditioned conjugated gradient output flag:
-        # 0  : successful exit
-        # >0 : convergence to tolerance not achieved, number of iterations
-        # <0 : illegal input or breakdown
-        # Alternative preconditiner: Li = np.linalg.cholesky(left_hand_side)
-        Mi = np.diag(np.diag(left_hand_side))
-        pcg_results = sp.sparse.linalg.cg(
+        # Jacobi (diagonal) preconditioner as a LinearOperator
+        diag = left_hand_side.diagonal()
+        # Avoid division by zero (should not happen for well-posed stencil)
+        inv_diag = np.where(diag != 0.0, 1.0 / diag, 1.0)
+        M = sp.sparse.linalg.LinearOperator(
+            (n_core, n_core), matvec=lambda x: inv_diag * x, dtype=float
+        )
+
+        pcg_solution, pcg_info = sp.sparse.linalg.cg(
             left_hand_side,
-            right_hand_side,
-            M=Mi,
+            rhs,
+            M=M,
             rtol=self._pcg_tolerance,
             maxiter=self._pcg_max_iterations,
-            atol=0,
+            atol=0.0,
         )
+        if pcg_info < 0:
+            raise RuntimeError(
+                f"PCG failed with illegal input/breakdown (info={pcg_info})."
+            )
 
         # Getting the new water surface elevation
         self._eta = np.zeros_like(self._eta_at_N)
-        self._eta[self.grid.core_nodes] = pcg_results[0]
-
+        self._eta[core] = pcg_solution
         # Boundary conditions
         # Radiation Boundary Conditions of Roed & Smedstad (1984) applied on open boundaries
         # Water surface elevation
@@ -1565,7 +1503,7 @@ class RiverFlowDynamics(Component):
             self._vel[self._fixed_entry_links] = self._entry_links_vel_values
 
         ## Getting the boundary links
-        tempB1 = [i in self._open_boundary_links for i in self.grid.active_links]
+        tempB1 = np.isin(self.grid.active_links, self._open_boundary_links)
         open_boundary_active_links = self._grid.active_links[tempB1]
 
         ## Getting the 1-line-upstream links from boundary links

@@ -84,6 +84,7 @@ from .profiler import Profiler
 from .profiler import TrickleDownProfiler
 from .radiation import Radiation
 from .river_flow_dynamics import RiverFlowDynamics
+from .river_flow_dynamics import RiverFlowDynamics_HLLC
 from .sink_fill import SinkFiller
 from .sink_fill import SinkFillerBarnes
 from .soil_moisture import SoilInfiltrationGreenAmpt
@@ -168,6 +169,7 @@ COMPONENTS = [
     Profiler,
     Radiation,
     RiverFlowDynamics,
+    RiverFlowDynamics_HLLC,
     SedDepEroder,
     SedimentPulserAtLinks,
     SedimentPulserEachParcel,

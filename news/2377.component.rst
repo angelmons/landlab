@@ -1,0 +1,1 @@
+Added the new RiverFlowDynamics_HLLC component for 2D shallow-water routing using an HLLC Riemann solver, and implemented significant performance optimizations for the existing RiverFlowDynamics component.
