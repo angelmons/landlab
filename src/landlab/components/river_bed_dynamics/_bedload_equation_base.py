@@ -18,7 +18,8 @@ Adding a new equation
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+from abc import ABC
+from abc import abstractmethod
 
 import numpy as np
 
@@ -97,6 +98,7 @@ class MPMEquation(BedloadEquation):
     def calculate(self, rbd):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_MPM_style as _m
+
         return _m.bedload_equation(rbd), None
 
 
@@ -119,6 +121,7 @@ class FLvBEquation(BedloadEquation):
     def calculate(self, rbd):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_MPM_style as _m
+
         return _m.bedload_equation(rbd), None
 
 
@@ -141,6 +144,7 @@ class WongAndParkerEquation(BedloadEquation):
     def calculate(self, rbd):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_MPM_style as _m
+
         return _m.bedload_equation(rbd), None
 
 
@@ -163,6 +167,7 @@ class HuangEquation(BedloadEquation):
     def calculate(self, rbd):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_MPM_style as _m
+
         return _m.bedload_equation(rbd), None
 
 
@@ -192,6 +197,7 @@ class Parker1990Equation(BedloadEquation):
     def calculate(self, rbd):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_Parker_1990 as _p
+
         return _p.bedload_equation(rbd)
 
 
@@ -220,6 +226,7 @@ class WilcockCrowe2003Equation(BedloadEquation):
     def calculate(self, rbd):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_Wilcock_Crowe_2003 as _wc
+
         return _wc.bedload_equation(rbd)
 
 
@@ -230,10 +237,10 @@ class WilcockCrowe2003Equation(BedloadEquation):
 #: Maps ``bedload_equation`` parameter strings to :class:`BedloadEquation`
 #: subclasses.  Add new entries here to register additional equations.
 EQUATION_REGISTRY: dict[str, type[BedloadEquation]] = {
-    "MPM":            MPMEquation,
-    "FLvB":           FLvBEquation,
-    "WongAndParker":  WongAndParkerEquation,
-    "Huang":          HuangEquation,
-    "Parker1990":     Parker1990Equation,
+    "MPM": MPMEquation,
+    "FLvB": FLvBEquation,
+    "WongAndParker": WongAndParkerEquation,
+    "Huang": HuangEquation,
+    "Parker1990": Parker1990Equation,
     "WilcockAndCrowe": WilcockCrowe2003Equation,
 }

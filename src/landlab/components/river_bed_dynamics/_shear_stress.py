@@ -103,7 +103,7 @@ class ShearStressCalculator:
         # Vertical component — reshape, reverse, finite-difference, restore
         u_nodes_v = g.map_mean_of_vertical_links_to_node(rbd._u)
         u_nodes_v = u_nodes_v.reshape(g._shape[0], g._shape[1])[::-1, :]
-        du_ds_v = -np.diff(u_nodes_v, axis=0) / g.dy     # vectorised 1B
+        du_ds_v = -np.diff(u_nodes_v, axis=0) / g.dy  # vectorised 1B
         vl = rbd._topo_vertical_links
         du_ds[vl] = np.flip(du_ds_v.T, axis=1).flatten(order="F")
 
@@ -118,10 +118,10 @@ class ShearStressCalculator:
         if self._use_hydraulics_radius:
             hl = rbd._topo_horizontal_links
             vl = rbd._topo_vertical_links
-            area      = rbd._scratch_area       # pre-allocated scratch (1D)
+            area = rbd._scratch_area  # pre-allocated scratch (1D)
             perimeter = rbd._scratch_perimeter
-            area[hl]      = h_links[hl] * g.dx
-            area[vl]      = h_links[vl] * g.dy
+            area[hl] = h_links[hl] * g.dx
+            area[vl] = h_links[vl] * g.dy
             perimeter[hl] = g.dx + 2 * h_links[hl]
             perimeter[vl] = g.dy + 2 * h_links[vl]
             rh = area / perimeter

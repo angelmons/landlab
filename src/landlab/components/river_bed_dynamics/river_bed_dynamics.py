@@ -930,8 +930,9 @@ class RiverBedDynamics(Component):
         # Phase-3A: instantiate the equation class from the registry.
         # Lazy import avoids a load-order race with the package __init__.py.
         from ._bedload_equation_base import EQUATION_REGISTRY
-        from ._shear_stress import ShearStressCalculator
         from ._gsd_evolver import ToroEscobarEvolver
+        from ._shear_stress import ShearStressCalculator
+
         if bedload_equation not in EQUATION_REGISTRY:
             known = sorted(EQUATION_REGISTRY)
             raise ValueError(
@@ -944,12 +945,14 @@ class RiverBedDynamics(Component):
             use_hydraulics_radius=use_hydraulics_radius_in_shear_stress
         )
         # Phase-3C: GSD evolution logic lives in ToroEscobarEvolver.
-        self._gsd_evolver = ToroEscobarEvolver(gsd_advection_scheme=gsd_advection_scheme)
-        self._check_gsd_residual   = check_gsd_residual
+        self._gsd_evolver = ToroEscobarEvolver(
+            gsd_advection_scheme=gsd_advection_scheme
+        )
+        self._check_gsd_residual = check_gsd_residual
         self._gsd_residual_threshold = gsd_residual_threshold
-        self._gsd_n_minus_1        = gsd_n_minus_1
+        self._gsd_n_minus_1 = gsd_n_minus_1
         # Phase 4C diagnostic fields — updated each step by GSDEvolver
-        self._bed_surf__gsd_residual_max  = 0.0
+        self._bed_surf__gsd_residual_max = 0.0
         self._bed_surf__gsd_residual_mean = 0.0
 
         self._variable_critical_shear_stress = variable_critical_shear_stress
@@ -1142,7 +1145,7 @@ class RiverBedDynamics(Component):
         hl_is_border = np.isin(g.horizontal_links, hl_border)
         self._topo_hlL = hlL
         self._topo_hlR = hlR
-        self._topo_hl  = g.horizontal_links[~hl_is_border]
+        self._topo_hl = g.horizontal_links[~hl_is_border]
 
         # --- Vertical border / interior link indices ---
         vlB = g.links_at_node[g.nodes_at_bottom_edge][:, 1]
@@ -1151,11 +1154,11 @@ class RiverBedDynamics(Component):
         vl_is_border = np.isin(g.vertical_links, vl_border)
         self._topo_vlB = vlB
         self._topo_vlT = vlT
-        self._topo_vl  = g.vertical_links[~vl_is_border]
+        self._topo_vl = g.vertical_links[~vl_is_border]
 
         # --- Full link-type index arrays (plain ndarray, no property overhead) ---
         self._topo_horizontal_links = g.horizontal_links
-        self._topo_vertical_links   = g.vertical_links
+        self._topo_vertical_links = g.vertical_links
 
         # --- Pre-allocated scratch arrays ---
         # _topo_du_ds_scratch: reset with du_ds[:] = 0.0 each shear_stress step.
@@ -1169,14 +1172,16 @@ class RiverBedDynamics(Component):
         # (hl ∪ hlL ∪ hlR and vl ∪ vlB ∪ vlT partition all links, proven in
         # _cache_topology docstring above).  np.empty skips zero-fill entirely
         # (~98× faster than np.zeros for these shapes).
-        n_grains = self._gsd.shape[0] - 1   # finalised after define_initial_bed_properties
-        self._scratch_qbTdev  = np.empty((g.number_of_links, 1))
+        n_grains = (
+            self._gsd.shape[0] - 1
+        )  # finalised after define_initial_bed_properties
+        self._scratch_qbTdev = np.empty((g.number_of_links, 1))
         self._scratch_qjj1dev = np.empty((g.number_of_links, n_grains))
 
         # _scratch_area / _scratch_perimeter: used in shear_stress() hydraulic
         # radius branch. area[hl] and area[vl] together cover all links, so
         # np.empty is safe here too.
-        self._scratch_area      = np.empty(g.number_of_links)
+        self._scratch_area = np.empty(g.number_of_links)
         self._scratch_perimeter = np.empty(g.number_of_links)
 
         # _scratch_D_link: used in bed_diffusion() constant mode. Filled fully
@@ -1195,7 +1200,7 @@ class RiverBedDynamics(Component):
         # _scratch_cum_link / _scratch_cum_node: output buffer for np.cumsum
         # inside calculate_DX.  Using out= avoids allocating a (n, n_grains+1)
         # array on every call (~3.7 ms saved per call on a 100×100 grid).
-        n_g1 = self._gsd.shape[0]   # n_grains + 1 (includes 2mm sentinel)
+        n_g1 = self._gsd.shape[0]  # n_grains + 1 (includes 2mm sentinel)
         self._scratch_cum_link = np.empty((g.number_of_links, n_g1))
         self._scratch_cum_node = np.empty((g.number_of_nodes, n_g1))
 
@@ -1227,18 +1232,18 @@ class RiverBedDynamics(Component):
         # ── Bootstrap static-math caches required by calculate_DX and
         # calculate_gsd_geo_mean_and_geo_std.  self._gsd and self._gs are
         # finalised here; _cache_topology() runs after __init__ completes.
-        _g   = self._grid
-        _ng  = self._gsd.shape[0] - 1
+        _g = self._grid
+        _ng = self._gsd.shape[0] - 1
         _nl, _nn = _g.number_of_links, _g.number_of_nodes
-        self._topo_gs_Psi_scale_D       = np.flip(np.log2(self._gsd[:, 0]))
-        self._topo_freq_gs_list_link    = np.arange(_nl)
-        self._topo_freq_gs_list_node    = np.arange(_nn)
-        self._scratch_gs_freq_pad_link  = np.zeros((_nl, _ng + 1))
-        self._scratch_gs_freq_pad_node  = np.zeros((_nn, _ng + 1))
+        self._topo_gs_Psi_scale_D = np.flip(np.log2(self._gsd[:, 0]))
+        self._topo_freq_gs_list_link = np.arange(_nl)
+        self._topo_freq_gs_list_node = np.arange(_nn)
+        self._scratch_gs_freq_pad_link = np.zeros((_nl, _ng + 1))
+        self._scratch_gs_freq_pad_node = np.zeros((_nn, _ng + 1))
         _gs_psi = np.log2(self._gs)
-        self._topo_gs_D_eq_Psi          = _gs_psi
-        self._topo_gs_D_eq_Psi_t_link   = np.tile(_gs_psi, (_nl, 1))
-        self._topo_gs_D_eq_Psi_t_node   = np.tile(_gs_psi, (_nn, 1))
+        self._topo_gs_D_eq_Psi = _gs_psi
+        self._topo_gs_D_eq_Psi_t_link = np.tile(_gs_psi, (_nl, 1))
+        self._topo_gs_D_eq_Psi_t_node = np.tile(_gs_psi, (_nn, 1))
         # cumsum output buffers for calculate_DX (n_grains+1 cols)
         _ng1 = self._gsd.shape[0]
         self._scratch_cum_link = np.empty((_nl, _ng1))
@@ -1342,6 +1347,7 @@ class RiverBedDynamics(Component):
         # adaptive schemes).  safety=0.9 keeps us just inside the envelope.
         if self._adaptive_dt:
             import warnings
+
             dt_safe = self.calc_max_stable_dt(safety=0.9)
             dt_requested = self._grid._dt
             if dt_safe < dt_requested:
@@ -1487,8 +1493,7 @@ class RiverBedDynamics(Component):
             return np.inf
         if self._bed_diffusion_mode == "nonlinear":
             D_max = (
-                np.abs(self._sed_transp__bedload_rate_link)
-                / self._bed_diffusion_mu
+                np.abs(self._sed_transp__bedload_rate_link) / self._bed_diffusion_mu
             ).max()
         else:
             D_max = self._bed_diffusion_coeff
@@ -1593,17 +1598,17 @@ class RiverBedDynamics(Component):
         z_node = self._grid.at_node["topographic__elevation"]
         z_link = self._grid.at_link["topographic__elevation"]
         n = self._grid.number_of_nodes
-        core = self._grid.core_nodes   # interior nodes only
+        core = self._grid.core_nodes  # interior nodes only
 
         # Base RHS at current state (already computed; read it directly)
         f0 = self._exner_rhs().copy()
 
         # Save state that will be temporarily modified
-        z_save      = z_node.copy()
+        z_save = z_node.copy()
         z_link_save = z_link.copy()
-        qb_save     = self._sed_transp__bedload_rate_link.copy()
-        nb_save     = self._sed_transp__net_bedload_node.copy()
-        tau_save    = self._shear_stress.copy()
+        qb_save = self._sed_transp__bedload_rate_link.copy()
+        nb_save = self._sed_transp__net_bedload_node.copy()
+        tau_save = self._shear_stress.copy()
         tau_abs_save = self._surface_water__shear_stress_link.copy()
 
         rows, cols, vals = [], [], []
@@ -1636,14 +1641,12 @@ class RiverBedDynamics(Component):
         # Restore full state
         self._grid.at_node["topographic__elevation"][:] = z_save
         self._grid.at_link["topographic__elevation"][:] = z_link_save
-        self._sed_transp__bedload_rate_link[:]  = qb_save
-        self._sed_transp__net_bedload_node[:]   = nb_save
-        self._shear_stress[:]                   = tau_save
+        self._sed_transp__bedload_rate_link[:] = qb_save
+        self._sed_transp__net_bedload_node[:] = nb_save
+        self._shear_stress[:] = tau_save
         self._surface_water__shear_stress_link[:] = tau_abs_save
 
-        return sp.csr_matrix(
-            (vals, (rows, cols)), shape=(n, n), dtype=float
-        )
+        return sp.csr_matrix((vals, (rows, cols)), shape=(n, n), dtype=float)
 
     def _assemble_implicit_system(self, J, dt: float):
         """Assemble the sparse linear system for the semi-implicit Exner step.
@@ -1689,11 +1692,13 @@ class RiverBedDynamics(Component):
 
         # Enforce zero delta-z at boundary nodes by replacing their rows
         # with identity rows (lhs[i,i]=1, lhs[i,j≠i]=0, rhs[i]=0)
-        bnd = np.concatenate([
-            np.asarray(self._out_id).ravel(),
-            np.asarray(self._bed_surf__elev_fix_node_id).ravel(),
-            np.asarray(self._closed_nodes).ravel(),
-        ])
+        bnd = np.concatenate(
+            [
+                np.asarray(self._out_id).ravel(),
+                np.asarray(self._bed_surf__elev_fix_node_id).ravel(),
+                np.asarray(self._closed_nodes).ravel(),
+            ]
+        )
         bnd = np.unique(bnd).astype(int)
 
         lhs = lhs.tolil()
@@ -1705,8 +1710,9 @@ class RiverBedDynamics(Component):
 
         return lhs, rhs
 
-    def _apply_elevation_bcs(self, z: np.ndarray, z0: np.ndarray,
-                              dz: np.ndarray) -> None:
+    def _apply_elevation_bcs(
+        self, z: np.ndarray, z0: np.ndarray, dz: np.ndarray
+    ) -> None:
         """Apply all boundary conditions to elevation array *z* in-place.
 
         Sets outlet, fixed, and closed nodes to their correct post-step
@@ -1722,9 +1728,9 @@ class RiverBedDynamics(Component):
             Total elevation change applied this step (used for the outlet
             zero-gradient BC).
         """
-        z[self._out_id]                  = z0[self._out_id]
+        z[self._out_id] = z0[self._out_id]
         z[self._bed_surf__elev_fix_node_id] = z0[self._bed_surf__elev_fix_node_id]
-        z[self._closed_nodes]            = z0[self._closed_nodes]
+        z[self._closed_nodes] = z0[self._closed_nodes]
 
         if self._outlet_boundary_condition == "zeroGradient":
             dz_outlet = dz[self._upstream_out_id]
@@ -1771,13 +1777,14 @@ class RiverBedDynamics(Component):
         The same boundary conditions (fixed elevation, closed nodes, outlet)
         are applied after every stage.
         """
-        z  = self._grid["node"]["topographic__elevation"]
+        z = self._grid["node"]["topographic__elevation"]
         z0 = z.copy()
         dt = self._grid._dt
 
         # -- Advective CFL check (Phase 2.2) --------------------------------
         if self._check_advective_cfl and not self._adaptive_dt:
             import warnings
+
             dt_safe = self.calc_max_stable_dt_advective(safety=1.0)
             if dt_safe < dt:
                 warnings.warn(
@@ -1799,7 +1806,7 @@ class RiverBedDynamics(Component):
         elif self._time_stepping == "rk2":
             # ── Heun's method (RK2) ──────────────────────────────────────── #
             # Stage 1 — k1 at z^n (bedload already computed for this step)
-            k1 = self._exner_rhs()          # dz/dt at z^n  [m/s]
+            k1 = self._exner_rhs()  # dz/dt at z^n  [m/s]
 
             # Predictor: advance z to z* and apply BCs
             z_star = z0 + dt * k1
@@ -1815,7 +1822,7 @@ class RiverBedDynamics(Component):
             self.shear_stress()
             self.bedload_equation()
             self.calculate_net_bedload()
-            k2 = self._exner_rhs()          # dz/dt at z*  [m/s]
+            k2 = self._exner_rhs()  # dz/dt at z*  [m/s]
 
             # Corrector: Heun average
             dz = dt / 2.0 * (k1 + k2)
@@ -1879,14 +1886,14 @@ class RiverBedDynamics(Component):
         import scipy.sparse as sp
         import scipy.sparse.linalg as spla
 
-        n   = self._grid.number_of_nodes
-        f0  = self._exner_rhs()                        # RHS at z^n
-        J   = self._compute_transport_jacobian()       # (n × n) CSR
+        n = self._grid.number_of_nodes
+        f0 = self._exner_rhs()  # RHS at z^n
+        J = self._compute_transport_jacobian()  # (n × n) CSR
 
         # Assemble system: A · δz = rhs
         # A = I - dt · J,  rhs = dt · f0
         eye = sp.eye(n, format="csr")
-        A   = eye - dt * J
+        A = eye - dt * J
         rhs = dt * f0
 
         # Enforce δz = 0 at every boundary node (all BC types):
@@ -1896,7 +1903,7 @@ class RiverBedDynamics(Component):
             np.union1d(
                 self._bed_surf__elev_fix_node_id,
                 self._closed_nodes,
-            )
+            ),
         ).astype(int)
 
         # Convert to LIL for efficient row assignment, then back to CSR
@@ -1904,7 +1911,7 @@ class RiverBedDynamics(Component):
         for b in bnd:
             A_lil.rows[b] = [b]
             A_lil.data[b] = [1.0]
-            rhs[b]        = 0.0
+            rhs[b] = 0.0
         A = A_lil.tocsr()
 
         try:
@@ -2019,9 +2026,7 @@ class RiverBedDynamics(Component):
         # -- 5. Elevation change [m] ----------------------------------------
         #   (1 - λp) dz/dt|_diff = div_diff
         #   => dz_diff = dt · div_diff / (1 - λp)
-        self._bed_surf__diffusive_dz_node = (
-            dt / (1.0 - self._lambda_p) * div_diff
-        )
+        self._bed_surf__diffusive_dz_node = dt / (1.0 - self._lambda_p) * div_diff
 
     def update_bed_surf_gsd(self):
         """Update the bed surface GSD via the Toro-Escobar fractional Exner equation.
@@ -2075,12 +2080,12 @@ class RiverBedDynamics(Component):
         # out= on np.cumsum avoids allocating a (n, n_grains+1) array each call.
         if gs_D_equiv_freq.shape[0] == self.grid.number_of_links:
             freq_gs_list = self._topo_freq_gs_list_link
-            gs_freq      = self._scratch_gs_freq_pad_link
-            cum_out      = self._scratch_cum_link
+            gs_freq = self._scratch_gs_freq_pad_link
+            cum_out = self._scratch_cum_link
         else:
             freq_gs_list = self._topo_freq_gs_list_node
-            gs_freq      = self._scratch_gs_freq_pad_node
-            cum_out      = self._scratch_cum_node
+            gs_freq = self._scratch_gs_freq_pad_node
+            cum_out = self._scratch_cum_node
 
         gs_Psi_scale_D = self._topo_gs_Psi_scale_D
 
@@ -2095,10 +2100,7 @@ class RiverBedDynamics(Component):
 
         gs_Psi_scale_DX = gs_Psi_scale_D[i0] + (
             (gs_Psi_scale_D[i1] - gs_Psi_scale_D[i0])
-            / (
-                cum_out[freq_gs_list, i1]
-                - cum_out[freq_gs_list, i0]
-            )
+            / (cum_out[freq_gs_list, i1] - cum_out[freq_gs_list, i0])
         ) * (fX - cum_out[freq_gs_list, i0])
 
         return 2**gs_Psi_scale_DX
@@ -2114,7 +2116,7 @@ class RiverBedDynamics(Component):
         else:
             gs_D_eq_Psi_tiled = self._topo_gs_D_eq_Psi_t_node  # (n_nodes, n_grains)
 
-        gs_D_eq_Psi = self._topo_gs_D_eq_Psi               # (n_grains,)
+        gs_D_eq_Psi = self._topo_gs_D_eq_Psi  # (n_grains,)
 
         # Geometric mean: exp2( sum(f_i * psi_i) )
         gs_D_eq_Psi_mean = np.sum(gs_D_equiv_freq * gs_D_eq_Psi, axis=1)  # (n,)

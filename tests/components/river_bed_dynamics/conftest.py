@@ -23,6 +23,7 @@ rbd_diffusion
 
 import numpy as np
 import pytest
+
 from landlab import RasterModelGrid
 from landlab.components import RiverBedDynamics
 from landlab.grid.mappers import map_mean_of_link_nodes_to_link

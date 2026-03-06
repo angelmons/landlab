@@ -36,8 +36,10 @@ import warnings
 
 import numpy as np
 import pytest
+
 from landlab import RasterModelGrid
-from landlab.components import OverlandFlow, RiverBedDynamics
+from landlab.components import OverlandFlow
+from landlab.components import RiverBedDynamics
 from landlab.grid.mappers import map_mean_of_link_nodes_to_link
 
 # ---------------------------------------------------------------------------
@@ -110,16 +112,12 @@ def test_median_size(rbd):
 
 def test_geometric_std_size_node(rbd):
     """Geometric standard deviation should be ~2.606 for the default GSD."""
-    np.testing.assert_almost_equal(
-        rbd._bed_surf__geo_std_size_node, 2.606, decimal=2
-    )
+    np.testing.assert_almost_equal(rbd._bed_surf__geo_std_size_node, 2.606, decimal=2)
 
 
 def test_sand_fraction_node(rbd):
     """Sand fraction (< 2 mm) at node 20 should be ~0.01 for the default GSD."""
-    np.testing.assert_almost_equal(
-        rbd._bed_surf__sand_fract_node[20], 0.01, decimal=3
-    )
+    np.testing.assert_almost_equal(rbd._bed_surf__sand_fract_node[20], 0.01, decimal=3)
 
 
 def test_velocity_previous_time_seeded_from_grid(rbd):
@@ -369,9 +367,9 @@ class TestGravitationalDiffusion:
         z_no_diff = _run(False)
         z_diff = _run(True)
 
-        assert not np.allclose(z_no_diff, z_diff, atol=1e-12), (
-            "Diffusion was enabled but produced the same result as no diffusion."
-        )
+        assert not np.allclose(
+            z_no_diff, z_diff, atol=1e-12
+        ), "Diffusion was enabled but produced the same result as no diffusion."
 
     def test_diffusion_stores_dz_array(self, rbd_diffusion):
         """After one step, _bed_surf__diffusive_dz_node must exist and be correct shape."""
@@ -418,9 +416,7 @@ class TestGravitationalDiffusion:
         qb = rbd._sed_transp__bedload_rate_link
         # Nodes where ALL surrounding links carry zero transport
         no_transport_nodes = np.where(
-            np.all(
-                np.abs(qb[rbd.grid.links_at_node]) < 1e-15, axis=1
-            )
+            np.all(np.abs(qb[rbd.grid.links_at_node]) < 1e-15, axis=1)
         )[0]
 
         if no_transport_nodes.size > 0:
@@ -578,7 +574,8 @@ class TestGravitationalDiffusion:
             rbd.run_one_step()
 
         cfl_warnings = [
-            w for w in caught
+            w
+            for w in caught
             if issubclass(w.category, UserWarning) and "CFL" in str(w.message)
         ]
         assert len(cfl_warnings) >= 1, (
@@ -625,7 +622,8 @@ class TestGravitationalDiffusion:
             rbd.run_one_step()
 
         cfl_warnings = [
-            w for w in caught
+            w
+            for w in caught
             if issubclass(w.category, UserWarning) and "CFL" in str(w.message)
         ]
         assert len(cfl_warnings) == 0
@@ -660,11 +658,11 @@ def test_rbd_approximate_solution():
     # -- Simulation settings ------------------------------------------------
     max_dt = 5
     simulation_max_time = 0.25 * 86400
-    n = 0.03874                          # Manning's n
+    n = 0.03874  # Manning's n
     upstream_sediment_supply = -0.0087  # bedload rate at inlet [m²/s]
 
-    link_inlet = np.array((221, 222))   # links where sediment enters
-    node_inlet = np.array((129, 130))   # nodes where water depth is forced
+    link_inlet = np.array((221, 222))  # links where sediment enters
+    node_inlet = np.array((129, 130))  # nodes where water depth is forced
     fixed_nodes_id = np.array((1, 2, 5, 6))  # fixed-elevation BC nodes
 
     # -- Grid setup ---------------------------------------------------------
@@ -718,9 +716,7 @@ def test_rbd_approximate_solution():
     # -- Coupled run --------------------------------------------------------
     calculated_nodes_Id = np.arange(128, 136)
     number_columns = grid.number_of_node_columns
-    number_rows_calculated_nodes = int(
-        calculated_nodes_Id.shape[0] / number_columns
-    )
+    number_rows_calculated_nodes = int(calculated_nodes_Id.shape[0] / number_columns)
     calculated_nodes_Id = np.reshape(
         calculated_nodes_Id, (number_rows_calculated_nodes, number_columns)
     )
@@ -753,10 +749,7 @@ def test_rbd_approximate_solution():
             grid["node"]["topographic__elevation"][
                 calculated_nodes_Id[i, 1 : number_columns - 1]
             ] = (
-                z[
-                    calculated_nodes_Id[i, 1 : number_columns - 1]
-                    - 2 * number_columns
-                ]
+                z[calculated_nodes_Id[i, 1 : number_columns - 1] - 2 * number_columns]
                 + 2 * grid.dx * bedSlope
             )
 
@@ -771,9 +764,7 @@ def test_rbd_approximate_solution():
 
     # --- Physics-based checks (robust across OverlandFlow versions) ----------
     # 1. Outlet nodes (fixed) stay near zero
-    assert abs(z_real[1]) < 0.1, (
-        f"Outlet node should be ~0 m, got {z_real[1]:.3f} m"
-    )
+    assert abs(z_real[1]) < 0.1, f"Outlet node should be ~0 m, got {z_real[1]:.3f} m"
 
     # 2. Aggradation occurred — upstream end rose relative to outlet
     assert z_real[-1] > z_real[1] + 5.0, (
@@ -784,9 +775,9 @@ def test_rbd_approximate_solution():
     # 3. Profile is broadly monotone from outlet (row 1) to inlet (last row):
     #    the upstream half should be higher than the downstream half on average
     n = len(z_real)
-    assert np.mean(z_real[n // 2:]) > np.mean(z_real[: n // 2]), (
-        "Upstream mean elevation should exceed downstream mean (aggradation wave)"
-    )
+    assert np.mean(z_real[n // 2 :]) > np.mean(
+        z_real[: n // 2]
+    ), "Upstream mean elevation should exceed downstream mean (aggradation wave)"
 
     # 4. No NaN or Inf values
     assert np.all(np.isfinite(z_real)), "Non-finite values in bed elevation profile"
@@ -794,17 +785,20 @@ def test_rbd_approximate_solution():
     # 5. Approximate slope in the middle third matches analytical order of magnitude
     #    Analytical equilibrium slope S ~ 0.01 (from MPM + given Q, D50, qb)
     mid = slice(n // 3, 2 * n // 3)
-    dx_physical = grid.dy  # metres between consecutive profile rows (= xy_spacing = 50 m)
+    dx_physical = (
+        grid.dy
+    )  # metres between consecutive profile rows (= xy_spacing = 50 m)
     dz = np.diff(z_real[mid])
     mean_slope = np.mean(dz) / dx_physical
-    assert 0.001 < mean_slope < 0.05, (
-        f"Mid-reach slope {mean_slope:.4f} m/m outside plausible range [0.001, 0.05]"
-    )
+    assert (
+        0.001 < mean_slope < 0.05
+    ), f"Mid-reach slope {mean_slope:.4f} m/m outside plausible range [0.001, 0.05]"
 
 
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Section 6 — CFL Infrastructure (Phase 2, Tasks 2.1–2.5)                    #
 # ═══════════════════════════════════════════════════════════════════════════ #
+
 
 class TestCFLInfrastructure:
     """Tests for advective CFL warning, calc_max_stable_dt*, and adaptive_dt."""
@@ -817,25 +811,31 @@ class TestCFLInfrastructure:
         from landlab.components import RiverBedDynamics
 
         grid = RasterModelGrid((5, 5), xy_spacing=1.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.102)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.102)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 0.25)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.102)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.102)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 0.25)
         gsd_loc = [[0, 1, 1, 1, 0]] * 5
         gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
         rbd = RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="Parker1990",
-            bed_surf__gsd_loc_node=gsd_loc, dt=1.0,
+            grid,
+            gsd=gsd,
+            bedload_equation="Parker1990",
+            bed_surf__gsd_loc_node=gsd_loc,
+            dt=1.0,
         )
-        rbd.run_one_step()   # populates bedload rates
+        rbd.run_one_step()  # populates bedload rates
         return rbd
 
     # ── 2.1: calc_max_stable_dt_advective ───────────────────────────────── #
@@ -867,7 +867,7 @@ class TestCFLInfrastructure:
     def test_dt_combined_no_diffusion_equals_advective(self, rbd_active):
         """Without diffusion, combined dt == advective dt."""
         assert not rbd_active._use_bed_diffusion
-        dt_adv  = rbd_active.calc_max_stable_dt_advective(safety=0.5)
+        dt_adv = rbd_active.calc_max_stable_dt_advective(safety=0.5)
         dt_comb = rbd_active.calc_max_stable_dt(safety=0.5)
         np.testing.assert_allclose(dt_comb, dt_adv, rtol=1e-12)
 
@@ -877,27 +877,34 @@ class TestCFLInfrastructure:
         from landlab.components import RiverBedDynamics
 
         grid = RasterModelGrid((5, 5), xy_spacing=1.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.102)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.102)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 0.25)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.102)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.102)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 0.25)
         gsd_loc = [[0, 1, 1, 1, 0]] * 5
         gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
         rbd = RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="Parker1990",
-            bed_surf__gsd_loc_node=gsd_loc, dt=1.0,
-            use_bed_diffusion=True, bed_diffusion_mu=0.5,
+            grid,
+            gsd=gsd,
+            bedload_equation="Parker1990",
+            bed_surf__gsd_loc_node=gsd_loc,
+            dt=1.0,
+            use_bed_diffusion=True,
+            bed_diffusion_mu=0.5,
         )
         rbd.run_one_step()
-        dt_adv  = rbd.calc_max_stable_dt_advective(safety=0.5)
+        dt_adv = rbd.calc_max_stable_dt_advective(safety=0.5)
         dt_comb = rbd.calc_max_stable_dt(safety=0.5)
         assert dt_comb <= dt_adv + 1e-12
 
@@ -916,6 +923,7 @@ class TestCFLInfrastructure:
         dt_safe = rbd_active.calc_max_stable_dt_advective(safety=1.0)
         rbd_active._grid._dt = dt_safe * 0.01
         import warnings as _warnings
+
         with _warnings.catch_warnings():
             _warnings.simplefilter("error", UserWarning)
             try:
@@ -929,6 +937,7 @@ class TestCFLInfrastructure:
         dt_safe = rbd_active.calc_max_stable_dt_advective(safety=1.0)
         rbd_active._grid._dt = dt_safe * 100
         import warnings as _warnings
+
         with _warnings.catch_warnings():
             _warnings.simplefilter("error", UserWarning)
             try:
@@ -944,6 +953,7 @@ class TestCFLInfrastructure:
         dt_safe = rbd_active.calc_max_stable_dt_advective(safety=1.0)
         rbd_active._grid._dt = dt_safe * 100
         import warnings as _warnings
+
         with _warnings.catch_warnings():
             _warnings.simplefilter("error", UserWarning)
             try:
@@ -958,7 +968,7 @@ class TestCFLInfrastructure:
         """adaptive_dt=True emits a reduction warning when dt > dt_safe."""
         rbd_active._adaptive_dt = True
         dt_safe = rbd_active.calc_max_stable_dt(safety=0.9)
-        rbd_active._grid._dt = dt_safe * 50   # 50× too large
+        rbd_active._grid._dt = dt_safe * 50  # 50× too large
         with pytest.warns(UserWarning, match="adaptive_dt"):
             rbd_active.run_one_step()
 
@@ -968,6 +978,7 @@ class TestCFLInfrastructure:
         dt_safe = rbd_active.calc_max_stable_dt(safety=0.9)
         rbd_active._grid._dt = dt_safe * 50
         import warnings as _warnings
+
         with _warnings.catch_warnings():
             _warnings.simplefilter("ignore", UserWarning)
             rbd_active.run_one_step()
@@ -977,8 +988,9 @@ class TestCFLInfrastructure:
         """No warning when dt is already within the CFL limit."""
         rbd_active._adaptive_dt = True
         dt_safe = rbd_active.calc_max_stable_dt(safety=0.9)
-        rbd_active._grid._dt = dt_safe * 0.5   # half the safe limit
+        rbd_active._grid._dt = dt_safe * 0.5  # half the safe limit
         import warnings as _warnings
+
         with _warnings.catch_warnings():
             _warnings.simplefilter("error", UserWarning)
             try:
@@ -992,6 +1004,7 @@ class TestCFLInfrastructure:
 # Section 7 — Phase 4A: RK2 time integration                                  #
 # ═══════════════════════════════════════════════════════════════════════════ #
 
+
 class TestRK2TimeIntegration:
     """Tests for the Heun's-method (RK2) Exner time integrator."""
 
@@ -1002,32 +1015,40 @@ class TestRK2TimeIntegration:
         from landlab.components import RiverBedDynamics
 
         grid = RasterModelGrid((5, 5), xy_spacing=1.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.102)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.102)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 0.25)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.102)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.102)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 0.25)
         gsd = [[32, 100], [16, 25], [8, 0]]
         return grid, gsd
 
     def _make_rbd(self, grid, gsd, scheme, dt=1.0):
         from landlab.components import RiverBedDynamics
+
         return RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="MPM",
-            dt=dt, time_stepping=scheme,
+            grid,
+            gsd=gsd,
+            bedload_equation="MPM",
+            dt=dt,
+            time_stepping=scheme,
             check_advective_cfl=False,
         )
 
     def test_invalid_time_stepping_raises(self, _grid_and_gsd):
         """Unknown time_stepping string raises ValueError."""
         from landlab.components import RiverBedDynamics
+
         grid, gsd = _grid_and_gsd
         with pytest.raises(ValueError, match="time_stepping"):
             RiverBedDynamics(grid, gsd=gsd, time_stepping="bogus")
@@ -1035,6 +1056,7 @@ class TestRK2TimeIntegration:
     def test_euler_default(self, _grid_and_gsd):
         """Default time_stepping is 'euler'."""
         from landlab.components import RiverBedDynamics
+
         grid, gsd = _grid_and_gsd
         rbd = RiverBedDynamics(grid, gsd=gsd)
         assert rbd._time_stepping == "euler"
@@ -1042,29 +1064,31 @@ class TestRK2TimeIntegration:
     def test_rk2_runs_without_error(self, _grid_and_gsd):
         """RK2 completes a step without exception."""
         import copy
+
         grid, gsd = _grid_and_gsd
         grid2 = copy.deepcopy(grid)
         rbd = self._make_rbd(grid2, gsd, "rk2")
-        rbd.run_one_step()   # must not raise
+        rbd.run_one_step()  # must not raise
 
     def test_rk2_and_euler_differ(self, _grid_and_gsd):
         """RK2 and Euler give different results (RK2 ≠ Euler for finite dt)."""
         import copy
+
         grid, gsd = _grid_and_gsd
 
         grid_e = copy.deepcopy(grid)
-        rbd_e  = self._make_rbd(grid_e, gsd, "euler", dt=0.5)
+        rbd_e = self._make_rbd(grid_e, gsd, "euler", dt=0.5)
         rbd_e.run_one_step()
         z_euler = grid_e.at_node["topographic__elevation"].copy()
 
         grid_r = copy.deepcopy(grid)
-        rbd_r  = self._make_rbd(grid_r, gsd, "rk2", dt=0.5)
+        rbd_r = self._make_rbd(grid_r, gsd, "rk2", dt=0.5)
         rbd_r.run_one_step()
-        z_rk2  = grid_r.at_node["topographic__elevation"].copy()
+        z_rk2 = grid_r.at_node["topographic__elevation"].copy()
 
-        assert not np.allclose(z_euler, z_rk2), (
-            "RK2 and Euler should give different results for finite dt"
-        )
+        assert not np.allclose(
+            z_euler, z_rk2
+        ), "RK2 and Euler should give different results for finite dt"
 
     def test_rk2_more_accurate_than_euler(self, _grid_and_gsd):
         """RK2 is substantially more accurate than Euler at the same dt.
@@ -1086,8 +1110,8 @@ class TestRK2TimeIntegration:
 
         grid, gsd = _grid_and_gsd
         interior = np.array([6, 7, 8, 11, 12, 13, 16, 17, 18])
-        T   = 0.1   # total simulated time
-        dt  = T     # one coarse step — maximises the Euler/RK2 difference
+        T = 0.1  # total simulated time
+        dt = T  # one coarse step — maximises the Euler/RK2 difference
 
         def run(scheme, step_dt, n_steps):
             g = copy.deepcopy(grid)
@@ -1097,13 +1121,13 @@ class TestRK2TimeIntegration:
             return g.at_node["topographic__elevation"].copy()
 
         # Fine reference: Euler at dt/64 (64× smaller steps)
-        z_ref  = run("euler", T / 64, 64)
+        z_ref = run("euler", T / 64, 64)
 
-        z_e    = run("euler", dt, 1)
-        z_r    = run("rk2",   dt, 1)
+        z_e = run("euler", dt, 1)
+        z_r = run("rk2", dt, 1)
 
         err_euler = np.abs(z_e[interior] - z_ref[interior]).mean()
-        err_rk2   = np.abs(z_r[interior] - z_ref[interior]).mean()
+        err_rk2 = np.abs(z_r[interior] - z_ref[interior]).mean()
 
         assert err_rk2 < err_euler, (
             f"RK2 error ({err_rk2:.2e}) should be less than "
@@ -1135,28 +1159,29 @@ class TestRK2TimeIntegration:
                 rbd.run_one_step()
             return g.at_node["topographic__elevation"].copy()
 
-        z_ref    = run(64)
+        z_ref = run(64)
         z_coarse = run(1)
-        z_fine   = run(2)
+        z_fine = run(2)
 
         err_c = np.abs(z_coarse[interior] - z_ref[interior]).mean()
-        err_f = np.abs(z_fine  [interior] - z_ref[interior]).mean()
+        err_f = np.abs(z_fine[interior] - z_ref[interior]).mean()
 
-        if err_c > 1e-14:   # only check when transport is active
+        if err_c > 1e-14:  # only check when transport is active
             ratio = err_f / err_c
-            assert 0.3 < ratio < 0.75, (
-                f"Euler error ratio {ratio:.3f} outside first-order range [0.3, 0.75]"
-            )
+            assert (
+                0.3 < ratio < 0.75
+            ), f"Euler error ratio {ratio:.3f} outside first-order range [0.3, 0.75]"
 
     def test_rk2_mass_conservation(self, _grid_and_gsd):
         """RK2 conserves sediment mass (sum of interior elevation changes ≈ 0)."""
         import copy
+
         grid, gsd = _grid_and_gsd
         grid2 = copy.deepcopy(grid)
         z0 = grid2.at_node["topographic__elevation"].copy()
         rbd = self._make_rbd(grid2, gsd, "rk2", dt=0.1)
         rbd.run_one_step()
-        z1  = grid2.at_node["topographic__elevation"]
+        z1 = grid2.at_node["topographic__elevation"]
         interior = grid2.core_nodes
         dz_sum = np.sum(z1[interior] - z0[interior])
         # Mass should be conserved to floating-point precision (≲ 1 mm total)
@@ -1165,27 +1190,36 @@ class TestRK2TimeIntegration:
     def test_rk2_with_diffusion(self, _grid_and_gsd):
         """RK2 works correctly with gravitational diffusion enabled."""
         import copy
+
         from landlab.components import RiverBedDynamics
+
         grid, gsd = _grid_and_gsd
         grid2 = copy.deepcopy(grid)
         rbd = RiverBedDynamics(
-            grid2, gsd=gsd, bedload_equation="MPM",
-            dt=0.1, time_stepping="rk2",
-            use_bed_diffusion=True, bed_diffusion_mu=0.5,
-            check_advective_cfl=False, check_diffusion_cfl=False,
+            grid2,
+            gsd=gsd,
+            bedload_equation="MPM",
+            dt=0.1,
+            time_stepping="rk2",
+            use_bed_diffusion=True,
+            bed_diffusion_mu=0.5,
+            check_advective_cfl=False,
+            check_diffusion_cfl=False,
         )
-        rbd.run_one_step()   # must not raise
+        rbd.run_one_step()  # must not raise
 
 
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Section 8 — Phase 4B: TVD minmod GSD advection                               #
 # ═══════════════════════════════════════════════════════════════════════════ #
 
+
 class TestTVDMinmodGSDAdvection:
     """Tests for the TVD minmod fractional bedload flux limiter."""
 
     def test_minmod_same_sign_returns_smaller(self):
         from landlab.components.river_bed_dynamics._gsd_evolver import _minmod
+
         a = np.array([1.0, -3.0, 2.0])
         b = np.array([2.0, -1.0, 4.0])
         expected = np.array([1.0, -1.0, 2.0])
@@ -1193,42 +1227,51 @@ class TestTVDMinmodGSDAdvection:
 
     def test_minmod_opposite_sign_returns_zero(self):
         from landlab.components.river_bed_dynamics._gsd_evolver import _minmod
+
         a = np.array([1.0, -2.0])
         b = np.array([-1.0, 3.0])
         np.testing.assert_array_equal(_minmod(a, b), np.array([0.0, 0.0]))
 
     def test_minmod_zero_input_returns_zero(self):
         from landlab.components.river_bed_dynamics._gsd_evolver import _minmod
+
         a = np.array([0.0, 1.0])
         b = np.array([1.0, 0.0])
         np.testing.assert_array_equal(_minmod(a, b), np.array([0.0, 0.0]))
 
     def test_invalid_scheme_raises(self, rbd_parker):
         """Unknown gsd_advection_scheme raises ValueError."""
-        from landlab.components import RiverBedDynamics
         from landlab import RasterModelGrid
+        from landlab.components import RiverBedDynamics
+
         grid = RasterModelGrid((5, 5), xy_spacing=100.0)
         grid.at_node["topographic__elevation"] = np.ones(25)
         grid.set_closed_boundaries_at_grid_edges(True, True, True, True)
         with pytest.raises(ValueError, match="gsd_advection_scheme"):
-            from landlab.components.river_bed_dynamics._gsd_evolver import ToroEscobarEvolver
+            from landlab.components.river_bed_dynamics._gsd_evolver import (
+                ToroEscobarEvolver,
+            )
+
             ToroEscobarEvolver(gsd_advection_scheme="bogus")
 
     def test_tvd_runs_without_error(self, rbd_parker):
         """TVD minmod scheme completes a full step without exception."""
         from landlab.components import RiverBedDynamics
+
         grid = rbd_parker._grid
         gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
-        gsd_loc = [[0,1,1,1,0]]*5
+        gsd_loc = [[0, 1, 1, 1, 0]] * 5
         from landlab.grid.mappers import map_mean_of_link_nodes_to_link
+
         rbd2 = RiverBedDynamics(
-            grid, gsd=gsd,
+            grid,
+            gsd=gsd,
             bedload_equation="Parker1990",
             bed_surf__gsd_loc_node=gsd_loc,
             dt=1.0,
             gsd_advection_scheme="tvd_minmod",
         )
-        rbd2.run_one_step()   # must not raise
+        rbd2.run_one_step()  # must not raise
 
     def test_tvd_and_upwind_differ(self):
         """TVD and upwind produce different GSD on a heterogeneous two-zone GSD.
@@ -1237,8 +1280,8 @@ class TestTVDMinmodGSDAdvection:
         fractional bedload equation is used.  Uses alternating GSD zones to
         create a sharp front where the minmod correction is non-zero.
         """
-        from landlab.components import RiverBedDynamics
         from landlab import RasterModelGrid
+        from landlab.components import RiverBedDynamics
         from landlab.grid.mappers import map_mean_of_link_nodes_to_link
 
         # Two compositions that differ strongly so TVD correction is large
@@ -1253,21 +1296,33 @@ class TestTVDMinmodGSDAdvection:
 
         def make(scheme):
             grid = RasterModelGrid((5, 5), xy_spacing=1.0)
-            grid.at_node["topographic__elevation"] = np.array([
-                [1.07, 1.06, 1.00, 1.06, 1.07],
-                [1.08, 1.07, 1.03, 1.07, 1.08],
-                [1.09, 1.08, 1.07, 1.08, 1.09],
-                [1.09, 1.09, 1.08, 1.09, 1.09],
-                [1.09, 1.09, 1.09, 1.09, 1.09],
-            ], dtype=float).flatten()
-            grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-            grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.5)
+            grid.at_node["topographic__elevation"] = np.array(
+                [
+                    [1.07, 1.06, 1.00, 1.06, 1.07],
+                    [1.08, 1.07, 1.03, 1.07, 1.08],
+                    [1.09, 1.08, 1.07, 1.08, 1.09],
+                    [1.09, 1.09, 1.08, 1.09, 1.09],
+                    [1.09, 1.09, 1.09, 1.09, 1.09],
+                ],
+                dtype=float,
+            ).flatten()
+            grid.set_watershed_boundary_condition(
+                grid.at_node["topographic__elevation"]
+            )
+            grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.5)
             grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 1.5)
-            grid.at_link["surface_water__depth"]    = map_mean_of_link_nodes_to_link(grid, "surface_water__depth")
-            grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(grid, "surface_water__velocity")
+            grid.at_link["surface_water__depth"] = map_mean_of_link_nodes_to_link(
+                grid, "surface_water__depth"
+            )
+            grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(
+                grid, "surface_water__velocity"
+            )
             rbd = RiverBedDynamics(
-                grid, gsd=gsd, bedload_equation="Parker1990",
-                bed_surf__gsd_loc_node=gsd_loc, dt=0.1,
+                grid,
+                gsd=gsd,
+                bedload_equation="Parker1990",
+                bed_surf__gsd_loc_node=gsd_loc,
+                dt=0.1,
                 track_stratigraphy=True,
                 gsd_advection_scheme=scheme,
                 check_gsd_residual=False,  # extreme GSD contrast expected here
@@ -1277,42 +1332,58 @@ class TestTVDMinmodGSDAdvection:
             return rbd._bed_surf__gsd_link.copy()
 
         gsd_upwind = make("upwind")
-        gsd_tvd    = make("tvd_minmod")
+        gsd_tvd = make("tvd_minmod")
 
-        assert not np.allclose(gsd_upwind, gsd_tvd, atol=1e-10), (
-            "TVD and upwind GSD arrays should differ with a heterogeneous GSD"
-        )
+        assert not np.allclose(
+            gsd_upwind, gsd_tvd, atol=1e-10
+        ), "TVD and upwind GSD arrays should differ with a heterogeneous GSD"
 
     def test_upwind_default_unchanged(self):
         """Explicit 'upwind' and omitted (default) produce identical results."""
-        from landlab.components import RiverBedDynamics
         from landlab import RasterModelGrid
+        from landlab.components import RiverBedDynamics
         from landlab.grid.mappers import map_mean_of_link_nodes_to_link
 
         gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
-        gsd_loc = [[0,1,1,1,0]]*5
+        gsd_loc = [[0, 1, 1, 1, 0]] * 5
 
         def make(scheme_kwarg):
             grid = RasterModelGrid((5, 5), xy_spacing=100.0)
-            grid.at_node["topographic__elevation"] = np.array([
-                [1.07, 1.06, 1.00, 1.06, 1.07],
-                [1.08, 1.07, 1.03, 1.07, 1.08],
-                [1.09, 1.08, 1.07, 1.08, 1.09],
-                [1.09, 1.09, 1.08, 1.09, 1.09],
-                [1.09, 1.09, 1.09, 1.09, 1.09],
-            ], dtype=float).flatten()
-            grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-            grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.102)
-            grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 0.25)
-            grid.at_link["surface_water__depth"]    = map_mean_of_link_nodes_to_link(grid, "surface_water__depth")
-            grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(grid, "surface_water__velocity")
-            rbd = RiverBedDynamics(grid, gsd=gsd, bedload_equation="Parker1990",
-                                   bed_surf__gsd_loc_node=gsd_loc, dt=1.0,
-                                   **scheme_kwarg)
+            grid.at_node["topographic__elevation"] = np.array(
+                [
+                    [1.07, 1.06, 1.00, 1.06, 1.07],
+                    [1.08, 1.07, 1.03, 1.07, 1.08],
+                    [1.09, 1.08, 1.07, 1.08, 1.09],
+                    [1.09, 1.09, 1.08, 1.09, 1.09],
+                    [1.09, 1.09, 1.09, 1.09, 1.09],
+                ],
+                dtype=float,
+            ).flatten()
+            grid.set_watershed_boundary_condition(
+                grid.at_node["topographic__elevation"]
+            )
+            grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.102)
+            grid.at_node["surface_water__velocity"] = np.full(
+                grid.number_of_nodes, 0.25
+            )
+            grid.at_link["surface_water__depth"] = map_mean_of_link_nodes_to_link(
+                grid, "surface_water__depth"
+            )
+            grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(
+                grid, "surface_water__velocity"
+            )
+            rbd = RiverBedDynamics(
+                grid,
+                gsd=gsd,
+                bedload_equation="Parker1990",
+                bed_surf__gsd_loc_node=gsd_loc,
+                dt=1.0,
+                **scheme_kwarg,
+            )
             rbd.run_one_step()
             return rbd._bed_surf__gsd_link.copy()
 
-        gsd_default  = make({})                                   # → "upwind" default
+        gsd_default = make({})  # → "upwind" default
         gsd_explicit = make({"gsd_advection_scheme": "upwind"})
         np.testing.assert_array_equal(gsd_default, gsd_explicit)
 
@@ -1320,6 +1391,7 @@ class TestTVDMinmodGSDAdvection:
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Section 9 — Phase 4C: GSD normalisation diagnostics                         #
 # ═══════════════════════════════════════════════════════════════════════════ #
+
 
 class TestGSDResidualDiagnostics:
     """Tests for Phase 4C GSD normalisation residual tracking."""
@@ -1333,25 +1405,35 @@ class TestGSDResidualDiagnostics:
         from landlab.grid.mappers import map_mean_of_link_nodes_to_link
 
         grid = RasterModelGrid((5, 5), xy_spacing=100.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.5)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.5)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 1.5)
-        grid.at_link["surface_water__depth"]    = map_mean_of_link_nodes_to_link(grid, "surface_water__depth")
-        grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(grid, "surface_water__velocity")
+        grid.at_link["surface_water__depth"] = map_mean_of_link_nodes_to_link(
+            grid, "surface_water__depth"
+        )
+        grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(
+            grid, "surface_water__velocity"
+        )
 
-        gsd    = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
-        gsd_loc = [[0,1,1,1,0]]*5
+        gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
+        gsd_loc = [[0, 1, 1, 1, 0]] * 5
 
         return RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="Parker1990",
-            bed_surf__gsd_loc_node=gsd_loc, dt=1.0,
+            grid,
+            gsd=gsd,
+            bedload_equation="Parker1990",
+            bed_surf__gsd_loc_node=gsd_loc,
+            dt=1.0,
             track_stratigraphy=True,
         )
 
@@ -1360,7 +1442,7 @@ class TestGSDResidualDiagnostics:
     def test_residual_attributes_initialised_to_zero(self, _rbd_parker_stratigraphy):
         """Before any step, residual diagnostics are zero."""
         rbd = _rbd_parker_stratigraphy
-        assert rbd._bed_surf__gsd_residual_max  == 0.0
+        assert rbd._bed_surf__gsd_residual_max == 0.0
         assert rbd._bed_surf__gsd_residual_mean == 0.0
 
     def test_residual_computed_after_step(self, _rbd_parker_stratigraphy):
@@ -1369,7 +1451,7 @@ class TestGSDResidualDiagnostics:
         rbd.run_one_step()
         assert np.isfinite(rbd._bed_surf__gsd_residual_max)
         assert np.isfinite(rbd._bed_surf__gsd_residual_mean)
-        assert rbd._bed_surf__gsd_residual_max  >= 0.0
+        assert rbd._bed_surf__gsd_residual_max >= 0.0
         assert rbd._bed_surf__gsd_residual_mean >= 0.0
 
     def test_residual_max_geq_mean(self, _rbd_parker_stratigraphy):
@@ -1380,7 +1462,9 @@ class TestGSDResidualDiagnostics:
 
     # ── 4C.2: warning when residual exceeds threshold ──────────────────── #
 
-    def test_residual_warning_fires_when_threshold_exceeded(self, _rbd_parker_stratigraphy):
+    def test_residual_warning_fires_when_threshold_exceeded(
+        self, _rbd_parker_stratigraphy
+    ):
         """UserWarning fires when gsd_residual_max > threshold."""
         rbd = _rbd_parker_stratigraphy
         # Force a tiny threshold so the warning triggers on any non-zero residual
@@ -1395,32 +1479,43 @@ class TestGSDResidualDiagnostics:
         from landlab.grid.mappers import map_mean_of_link_nodes_to_link
 
         grid = RasterModelGrid((5, 5), xy_spacing=100.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.5)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.5)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 1.5)
-        grid.at_link["surface_water__depth"]    = map_mean_of_link_nodes_to_link(grid, "surface_water__depth")
-        grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(grid, "surface_water__velocity")
-        gsd    = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
-        gsd_loc = [[0,1,1,1,0]]*5
+        grid.at_link["surface_water__depth"] = map_mean_of_link_nodes_to_link(
+            grid, "surface_water__depth"
+        )
+        grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(
+            grid, "surface_water__velocity"
+        )
+        gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
+        gsd_loc = [[0, 1, 1, 1, 0]] * 5
 
         rbd = RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="Parker1990",
-            bed_surf__gsd_loc_node=gsd_loc, dt=1.0,
+            grid,
+            gsd=gsd,
+            bedload_equation="Parker1990",
+            bed_surf__gsd_loc_node=gsd_loc,
+            dt=1.0,
             track_stratigraphy=True,
             check_gsd_residual=False,
             gsd_residual_threshold=-1.0,  # would always trigger
         )
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("error", UserWarning)
-            rbd.run_one_step()   # must not raise (no warning)
+            rbd.run_one_step()  # must not raise (no warning)
 
     # ── 4C.3: N−1 fraction tracking ────────────────────────────────────── #
 
@@ -1436,27 +1531,38 @@ class TestGSDResidualDiagnostics:
         from landlab.grid.mappers import map_mean_of_link_nodes_to_link
 
         grid = RasterModelGrid((5, 5), xy_spacing=100.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.5)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.5)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 1.5)
-        grid.at_link["surface_water__depth"]    = map_mean_of_link_nodes_to_link(grid, "surface_water__depth")
-        grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(grid, "surface_water__velocity")
+        grid.at_link["surface_water__depth"] = map_mean_of_link_nodes_to_link(
+            grid, "surface_water__depth"
+        )
+        grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(
+            grid, "surface_water__velocity"
+        )
         gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
-        gsd_loc = [[0,1,1,1,0]]*5
+        gsd_loc = [[0, 1, 1, 1, 0]] * 5
 
         rbd = RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="Parker1990",
-            bed_surf__gsd_loc_node=gsd_loc, dt=1.0,
-            track_stratigraphy=True, gsd_n_minus_1=True,
+            grid,
+            gsd=gsd,
+            bedload_equation="Parker1990",
+            bed_surf__gsd_loc_node=gsd_loc,
+            dt=1.0,
+            track_stratigraphy=True,
+            gsd_n_minus_1=True,
         )
-        rbd.run_one_step()   # must not raise
+        rbd.run_one_step()  # must not raise
 
     def test_n_minus_1_gsd_sums_to_one(self):
         """With gsd_n_minus_1=True, GSD at every link sums to 1 after step."""
@@ -1465,25 +1571,36 @@ class TestGSDResidualDiagnostics:
         from landlab.grid.mappers import map_mean_of_link_nodes_to_link
 
         grid = RasterModelGrid((5, 5), xy_spacing=100.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.5)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.5)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 1.5)
-        grid.at_link["surface_water__depth"]    = map_mean_of_link_nodes_to_link(grid, "surface_water__depth")
-        grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(grid, "surface_water__velocity")
+        grid.at_link["surface_water__depth"] = map_mean_of_link_nodes_to_link(
+            grid, "surface_water__depth"
+        )
+        grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(
+            grid, "surface_water__velocity"
+        )
         gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
-        gsd_loc = [[0,1,1,1,0]]*5
+        gsd_loc = [[0, 1, 1, 1, 0]] * 5
 
         rbd = RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="Parker1990",
-            bed_surf__gsd_loc_node=gsd_loc, dt=1.0,
-            track_stratigraphy=True, gsd_n_minus_1=True,
+            grid,
+            gsd=gsd,
+            bedload_equation="Parker1990",
+            bed_surf__gsd_loc_node=gsd_loc,
+            dt=1.0,
+            track_stratigraphy=True,
+            gsd_n_minus_1=True,
         )
         for _ in range(5):
             rbd.run_one_step()
@@ -1492,14 +1609,17 @@ class TestGSDResidualDiagnostics:
         # All non-zero links should sum to 1 within floating-point tolerance
         active = row_sums > 1e-12
         np.testing.assert_allclose(
-            row_sums[active], 1.0, atol=1e-12,
-            err_msg="GSD fractions do not sum to 1 with gsd_n_minus_1=True"
+            row_sums[active],
+            1.0,
+            atol=1e-12,
+            err_msg="GSD fractions do not sum to 1 with gsd_n_minus_1=True",
         )
 
 
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Section 10 — Phase 5.1: Transport Jacobian                                   #
 # ═══════════════════════════════════════════════════════════════════════════ #
+
 
 class TestTransportJacobian:
     """Tests for _compute_transport_jacobian (Phase 5.1)."""
@@ -1509,28 +1629,34 @@ class TestTransportJacobian:
         """5×5 component with meaningful transport for Jacobian testing."""
         from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
+
         grid = RasterModelGrid((5, 5), xy_spacing=1.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.5)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.5)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 1.5)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.5)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.5)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.5)
         gsd = [[32, 100], [16, 25], [8, 0]]
-        rbd = RiverBedDynamics(grid, gsd=gsd, bedload_equation="MPM",
-                               dt=1.0, check_advective_cfl=False)
-        rbd.run_one_step()   # populate transport fields
+        rbd = RiverBedDynamics(
+            grid, gsd=gsd, bedload_equation="MPM", dt=1.0, check_advective_cfl=False
+        )
+        rbd.run_one_step()  # populate transport fields
         return rbd
 
     def test_jacobian_returns_sparse_matrix(self, rbd_active):
         """_compute_transport_jacobian returns a scipy CSR matrix."""
         import scipy.sparse as sp
+
         J = rbd_active._compute_transport_jacobian()
         assert sp.issparse(J)
         assert J.format == "csr"
@@ -1545,13 +1671,13 @@ class TestTransportJacobian:
         """Columns for boundary nodes are structurally zero."""
         J = rbd_active._compute_transport_jacobian().toarray()
         bnd = rbd_active._grid.boundary_nodes
-        assert np.all(J[:, bnd] == 0.0), (
-            "Boundary node columns should be zero (elevations are fixed by BCs)"
-        )
+        assert np.all(
+            J[:, bnd] == 0.0
+        ), "Boundary node columns should be zero (elevations are fixed by BCs)"
 
     def test_state_restored_after_jacobian(self, rbd_active):
         """Component state is fully restored after Jacobian computation."""
-        z_before  = rbd_active._grid.at_node["topographic__elevation"].copy()
+        z_before = rbd_active._grid.at_node["topographic__elevation"].copy()
         qb_before = rbd_active._sed_transp__bedload_rate_link.copy()
         nb_before = rbd_active._sed_transp__net_bedload_node.copy()
 
@@ -1599,6 +1725,7 @@ class TestTransportJacobian:
 # Section 11 — Phase 5.2: Implicit (linearised backward-Euler) solver          #
 # ═══════════════════════════════════════════════════════════════════════════ #
 
+
 class TestImplicitSolver:
     """Tests for the linearised backward-Euler Exner integrator."""
 
@@ -1606,30 +1733,41 @@ class TestImplicitSolver:
     def grid_and_gsd(self):
         """5×5 watershed grid with active bedload transport."""
         from landlab import RasterModelGrid
+
         grid = RasterModelGrid((5, 5), xy_spacing=1.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(25, 0.5)
+        grid.at_node["surface_water__depth"] = np.full(25, 0.5)
         grid.at_node["surface_water__velocity"] = np.full(25, 1.5)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.5)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.5)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.5)
         return grid, [[32, 100], [16, 25], [8, 0]]
 
     def _make(self, grid, gsd, scheme, dt=1.0):
         from landlab.components import RiverBedDynamics
-        return RiverBedDynamics(grid, gsd=gsd, bedload_equation="MPM",
-                                dt=dt, time_stepping=scheme,
-                                check_advective_cfl=False)
+
+        return RiverBedDynamics(
+            grid,
+            gsd=gsd,
+            bedload_equation="MPM",
+            dt=dt,
+            time_stepping=scheme,
+            check_advective_cfl=False,
+        )
 
     def test_implicit_option_accepted(self, grid_and_gsd):
         """time_stepping='implicit' is accepted without error."""
         import copy
+
         grid, gsd = grid_and_gsd
         rbd = self._make(copy.deepcopy(grid), gsd, "implicit")
         assert rbd._time_stepping == "implicit"
@@ -1637,13 +1775,15 @@ class TestImplicitSolver:
     def test_implicit_step_completes(self, grid_and_gsd):
         """One implicit step runs without exception."""
         import copy
+
         grid, gsd = grid_and_gsd
         rbd = self._make(copy.deepcopy(grid), gsd, "implicit")
-        rbd.run_one_step()   # must not raise
+        rbd.run_one_step()  # must not raise
 
     def test_closed_nodes_unchanged(self, grid_and_gsd):
         """Implicit step does not alter closed boundary nodes."""
         import copy
+
         grid, gsd = grid_and_gsd
         g = copy.deepcopy(grid)
         rbd = self._make(g, gsd, "implicit")
@@ -1652,13 +1792,15 @@ class TestImplicitSolver:
         z1 = g.at_node["topographic__elevation"]
         closed = rbd._closed_nodes
         np.testing.assert_array_equal(
-            z1[closed], z0[closed],
-            err_msg="Closed nodes must not change during implicit step"
+            z1[closed],
+            z0[closed],
+            err_msg="Closed nodes must not change during implicit step",
         )
 
     def test_implicit_differs_from_euler(self, grid_and_gsd):
         """Implicit and Euler give different results for dt=1 s."""
         import copy
+
         grid, gsd = grid_and_gsd
 
         ge = copy.deepcopy(grid)
@@ -1671,9 +1813,9 @@ class TestImplicitSolver:
         rbd_i.run_one_step()
         z_impl = gi.at_node["topographic__elevation"].copy()
 
-        assert not np.allclose(z_euler, z_impl), (
-            "Implicit and Euler should differ for a nonlinear bedload problem"
-        )
+        assert not np.allclose(
+            z_euler, z_impl
+        ), "Implicit and Euler should differ for a nonlinear bedload problem"
 
     def test_implicit_converges_to_euler_at_small_dt(self, grid_and_gsd):
         """As dt → 0 implicit and Euler solutions converge to the same answer.
@@ -1682,9 +1824,10 @@ class TestImplicitSolver:
         small dt they should agree to within O(dt²).
         """
         import copy
+
         grid, gsd = grid_and_gsd
         interior = grid.core_nodes
-        T = 0.01     # very short simulation
+        T = 0.01  # very short simulation
 
         def run(scheme, dt):
             g = copy.deepcopy(grid)
@@ -1694,8 +1837,8 @@ class TestImplicitSolver:
                 rbd.run_one_step()
             return g.at_node["topographic__elevation"][interior].copy()
 
-        z_euler  = run("euler",    T)
-        z_impl   = run("implicit", T)
+        z_euler = run("euler", T)
+        z_impl = run("implicit", T)
         max_diff = np.abs(z_euler - z_impl).max()
 
         assert max_diff < 1e-3, (
@@ -1711,6 +1854,7 @@ class TestImplicitSolver:
         it unconditionally stable).
         """
         import copy
+
         grid, gsd = grid_and_gsd
 
         # Find the explicit CFL limit
@@ -1721,22 +1865,23 @@ class TestImplicitSolver:
         rbd_ref.calculate_net_bedload()
         dt_cfl = rbd_ref.calc_max_stable_dt_advective(safety=1.0)
 
-        dt_large = 10.0 * dt_cfl   # 10× beyond explicit stability limit
+        dt_large = 10.0 * dt_cfl  # 10× beyond explicit stability limit
         g = copy.deepcopy(grid)
         rbd = self._make(g, gsd, "implicit", dt=dt_large)
         rbd.run_one_step()
 
         z = g.at_node["topographic__elevation"]
-        assert np.all(np.isfinite(z)), (
-            "Implicit solver produced non-finite elevations at large dt"
-        )
-        assert np.all(np.abs(z - z[0]) < 10.0), (
-            "Implicit solver produced unrealistically large elevation changes"
-        )
+        assert np.all(
+            np.isfinite(z)
+        ), "Implicit solver produced non-finite elevations at large dt"
+        assert np.all(
+            np.abs(z - z[0]) < 10.0
+        ), "Implicit solver produced unrealistically large elevation changes"
 
     def test_solve_implicit_exner_returns_array(self, grid_and_gsd):
         """_solve_implicit_exner returns an ndarray of the right size."""
         import copy
+
         grid, gsd = grid_and_gsd
         g = copy.deepcopy(grid)
         rbd = self._make(g, gsd, "implicit")
@@ -1753,6 +1898,7 @@ class TestImplicitSolver:
 # Section 11 — Phase 5.2a: implicit system assembly                            #
 # ═══════════════════════════════════════════════════════════════════════════ #
 
+
 class TestAssembleImplicitSystem:
     """Tests for _assemble_implicit_system (Phase 5.2a)."""
 
@@ -1760,28 +1906,34 @@ class TestAssembleImplicitSystem:
     def rbd_and_J(self):
         from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
+
         grid = RasterModelGrid((5, 5), xy_spacing=1.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
         grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.5)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.5)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 1.5)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.5)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.5)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.5)
         gsd = [[32, 100], [16, 25], [8, 0]]
-        rbd = RiverBedDynamics(grid, gsd=gsd, bedload_equation="MPM",
-                               dt=1.0, check_advective_cfl=False)
+        rbd = RiverBedDynamics(
+            grid, gsd=gsd, bedload_equation="MPM", dt=1.0, check_advective_cfl=False
+        )
         rbd.run_one_step()
         J = rbd._compute_transport_jacobian()
         return rbd, J
 
     def test_returns_sparse_and_vector(self, rbd_and_J):
         import scipy.sparse as sp
+
         rbd, J = rbd_and_J
         A, b = rbd._assemble_implicit_system(J, dt=1.0)
         assert sp.issparse(A)
@@ -1799,11 +1951,13 @@ class TestAssembleImplicitSystem:
         rbd, J = rbd_and_J
         A, b = rbd._assemble_implicit_system(J, dt=1.0)
         A_dense = A.toarray()
-        bnd = np.concatenate([
-            np.asarray(rbd._out_id).ravel(),
-            np.asarray(rbd._bed_surf__elev_fix_node_id).ravel(),
-            np.asarray(rbd._closed_nodes).ravel(),
-        ])
+        bnd = np.concatenate(
+            [
+                np.asarray(rbd._out_id).ravel(),
+                np.asarray(rbd._bed_surf__elev_fix_node_id).ravel(),
+                np.asarray(rbd._closed_nodes).ravel(),
+            ]
+        )
         bnd = np.unique(bnd)
         for i in bnd:
             row = A_dense[i]
@@ -1817,7 +1971,7 @@ class TestAssembleImplicitSystem:
         A, _ = rbd._assemble_implicit_system(J, dt=1e-6)
         A_dense = A.toarray()
         diag = np.abs(np.diag(A_dense))
-        off  = np.sum(np.abs(A_dense), axis=1) - diag
+        off = np.sum(np.abs(A_dense), axis=1) - diag
         assert np.all(diag >= off * 0.99), "LHS not diagonally dominant at tiny dt"
 
     def test_rhs_scales_with_dt(self, rbd_and_J):
@@ -1833,6 +1987,7 @@ class TestAssembleImplicitSystem:
 # Section 12 — Phase 5.2b: implicit solver                                     #
 # ═══════════════════════════════════════════════════════════════════════════ #
 
+
 class TestImplicitSolver:
     """Tests for time_stepping='implicit' (Phase 5.2b)."""
 
@@ -1844,27 +1999,33 @@ class TestImplicitSolver:
 
         def _make(scheme="implicit", dt=1.0):
             grid = RasterModelGrid((5, 5), xy_spacing=1.0)
-            grid.at_node["topographic__elevation"] = np.array([
-                [1.07, 1.06, 1.00, 1.06, 1.07],
-                [1.08, 1.07, 1.03, 1.07, 1.08],
-                [1.09, 1.08, 1.07, 1.08, 1.09],
-                [1.09, 1.09, 1.08, 1.09, 1.09],
-                [1.09, 1.09, 1.09, 1.09, 1.09],
-            ], dtype=float).flatten()
+            grid.at_node["topographic__elevation"] = np.array(
+                [
+                    [1.07, 1.06, 1.00, 1.06, 1.07],
+                    [1.08, 1.07, 1.03, 1.07, 1.08],
+                    [1.09, 1.08, 1.07, 1.08, 1.09],
+                    [1.09, 1.09, 1.08, 1.09, 1.09],
+                    [1.09, 1.09, 1.09, 1.09, 1.09],
+                ],
+                dtype=float,
+            ).flatten()
             grid.set_watershed_boundary_condition(
-                grid.at_node["topographic__elevation"])
-            grid.at_node["surface_water__depth"]    = np.full(25, 0.5)
+                grid.at_node["topographic__elevation"]
+            )
+            grid.at_node["surface_water__depth"] = np.full(25, 0.5)
             grid.at_node["surface_water__velocity"] = np.full(25, 1.5)
-            grid.at_link["surface_water__depth"]    = np.full(
-                grid.number_of_links, 0.5)
-            grid.at_link["surface_water__velocity"] = np.full(
-                grid.number_of_links, 1.5)
+            grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.5)
+            grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.5)
             gsd = [[32, 100], [16, 25], [8, 0]]
             return RiverBedDynamics(
-                grid, gsd=gsd, bedload_equation="MPM",
-                dt=dt, time_stepping=scheme,
+                grid,
+                gsd=gsd,
+                bedload_equation="MPM",
+                dt=dt,
+                time_stepping=scheme,
                 check_advective_cfl=False,
             )
+
         return _make
 
     def test_implicit_runs_without_error(self, make_rbd):
@@ -1887,32 +2048,32 @@ class TestImplicitSolver:
         elevation is allowed to follow its upstream neighbour.
         """
         rbd = make_rbd("implicit")
-        z0  = rbd._grid.at_node["topographic__elevation"].copy()
+        z0 = rbd._grid.at_node["topographic__elevation"].copy()
         rbd.run_one_step()
-        z1  = rbd._grid.at_node["topographic__elevation"]
+        z1 = rbd._grid.at_node["topographic__elevation"]
 
         # All boundary nodes except the outlet
         all_bnd = set(rbd._grid.boundary_nodes.tolist())
-        outlet  = set(np.asarray(rbd._out_id).ravel().tolist())
+        outlet = set(np.asarray(rbd._out_id).ravel().tolist())
         fixed_bnd = np.array(sorted(all_bnd - outlet))
 
         np.testing.assert_array_equal(
-            z1[fixed_bnd], z0[fixed_bnd],
-            err_msg="Fixed/closed boundary elevations changed after implicit step"
+            z1[fixed_bnd],
+            z0[fixed_bnd],
+            err_msg="Fixed/closed boundary elevations changed after implicit step",
         )
 
     def test_implicit_vs_euler_small_dt(self, make_rbd):
         """At tiny dt, implicit and Euler give nearly the same answer."""
         dt = 1e-4
-        rbd_e = make_rbd("euler",    dt)
+        rbd_e = make_rbd("euler", dt)
         rbd_i = make_rbd("implicit", dt)
         rbd_e.run_one_step()
         rbd_i.run_one_step()
         z_e = rbd_e._grid.at_node["topographic__elevation"]
         z_i = rbd_i._grid.at_node["topographic__elevation"]
         np.testing.assert_allclose(
-            z_e, z_i, atol=1e-10,
-            err_msg="Implicit and Euler diverge at tiny dt"
+            z_e, z_i, atol=1e-10, err_msg="Implicit and Euler diverge at tiny dt"
         )
 
     def test_implicit_stable_at_large_dt(self, make_rbd):
@@ -1926,7 +2087,7 @@ class TestImplicitSolver:
         dt_large = max(dt_cfl * 100, 10.0)  # at least 10 s
 
         rbd_i = make_rbd("implicit", dt_large)
-        rbd_i.run_one_step()   # must not raise or produce NaN
+        rbd_i.run_one_step()  # must not raise or produce NaN
 
         z = rbd_i._grid.at_node["topographic__elevation"]
         assert np.all(np.isfinite(z)), "Implicit step produced non-finite elevation"
@@ -1934,16 +2095,19 @@ class TestImplicitSolver:
     def test_implicit_mass_conservation(self, make_rbd):
         """Implicit step conserves sediment mass at interior nodes (Σdz ≈ 0)."""
         rbd = make_rbd("implicit", dt=1.0)
-        z0  = rbd._grid.at_node["topographic__elevation"].copy()
+        z0 = rbd._grid.at_node["topographic__elevation"].copy()
         rbd.run_one_step()
-        z1  = rbd._grid.at_node["topographic__elevation"]
+        z1 = rbd._grid.at_node["topographic__elevation"]
         dz_sum = np.sum(z1[rbd._grid.core_nodes] - z0[rbd._grid.core_nodes])
-        assert abs(dz_sum) < 1e-3, f"Implicit step not mass-conservative: Σdz={dz_sum:.2e}"
+        assert (
+            abs(dz_sum) < 1e-3
+        ), f"Implicit step not mass-conservative: Σdz={dz_sum:.2e}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Section 13 — Phase 5.3: implicit validation & benchmark                      #
 # ═══════════════════════════════════════════════════════════════════════════ #
+
 
 class TestImplicitValidation:
     """Validate and benchmark the implicit Exner solver (Phase 5.3).
@@ -1969,33 +2133,39 @@ class TestImplicitValidation:
     @pytest.fixture
     def grid_gsd(self):
         from landlab import RasterModelGrid
+
         grid = RasterModelGrid((5, 5), xy_spacing=1.0)
-        grid.at_node["topographic__elevation"] = np.array([
-            [1.07, 1.06, 1.00, 1.06, 1.07],
-            [1.08, 1.07, 1.03, 1.07, 1.08],
-            [1.09, 1.08, 1.07, 1.08, 1.09],
-            [1.09, 1.09, 1.08, 1.09, 1.09],
-            [1.09, 1.09, 1.09, 1.09, 1.09],
-        ], dtype=float).flatten()
-        grid.set_watershed_boundary_condition(
-            grid.at_node["topographic__elevation"])
-        grid.at_node["surface_water__depth"]    = np.full(25, 0.5)
+        grid.at_node["topographic__elevation"] = np.array(
+            [
+                [1.07, 1.06, 1.00, 1.06, 1.07],
+                [1.08, 1.07, 1.03, 1.07, 1.08],
+                [1.09, 1.08, 1.07, 1.08, 1.09],
+                [1.09, 1.09, 1.08, 1.09, 1.09],
+                [1.09, 1.09, 1.09, 1.09, 1.09],
+            ],
+            dtype=float,
+        ).flatten()
+        grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
+        grid.at_node["surface_water__depth"] = np.full(25, 0.5)
         grid.at_node["surface_water__velocity"] = np.full(25, 1.5)
-        grid.at_link["surface_water__depth"]    = np.full(
-            grid.number_of_links, 0.5)
-        grid.at_link["surface_water__velocity"] = np.full(
-            grid.number_of_links, 1.5)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.5)
+        grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.5)
         gsd = [[32, 100], [16, 25], [8, 0]]
         return grid, gsd
 
     def _make(self, grid_gsd, scheme, dt):
         import copy
+
         from landlab.components import RiverBedDynamics
+
         grid, gsd = grid_gsd
         g = copy.deepcopy(grid)
         return RiverBedDynamics(
-            g, gsd=gsd, bedload_equation="MPM",
-            dt=dt, time_stepping=scheme,
+            g,
+            gsd=gsd,
+            bedload_equation="MPM",
+            dt=dt,
+            time_stepping=scheme,
             check_advective_cfl=False,
         )
 
@@ -2004,8 +2174,8 @@ class TestImplicitValidation:
     def test_implicit_matches_euler_small_dt(self, grid_gsd):
         """Implicit and Euler agree to < 1 µm at tiny dt (1e-4 s), 5 steps."""
         dt = 1e-4
-        n  = 5
-        rbd_e = self._make(grid_gsd, "euler",    dt)
+        n = 5
+        rbd_e = self._make(grid_gsd, "euler", dt)
         rbd_i = self._make(grid_gsd, "implicit", dt)
         for _ in range(n):
             rbd_e.run_one_step()
@@ -2013,8 +2183,9 @@ class TestImplicitValidation:
 
         z_e = rbd_e._grid.at_node["topographic__elevation"]
         z_i = rbd_i._grid.at_node["topographic__elevation"]
-        np.testing.assert_allclose(z_e, z_i, atol=1e-6,
-            err_msg="Implicit and Euler diverge at small dt")
+        np.testing.assert_allclose(
+            z_e, z_i, atol=1e-6, err_msg="Implicit and Euler diverge at small dt"
+        )
 
     # ── 5.3.2 Steady-state convergence: same physical time ──────────────── #
 
@@ -2022,9 +2193,10 @@ class TestImplicitValidation:
         """Implicit (few large steps) and Euler (many small steps) converge
         to the same elevation field within 5 mm over the same total time."""
         import copy
+
         from landlab.components import RiverBedDynamics
 
-        T = 0.05   # total simulated time [s]
+        T = 0.05  # total simulated time [s]
 
         # Euler: 50 steps at dt=0.001
         rbd_e = self._make(grid_gsd, "euler", 0.001)
@@ -2056,40 +2228,41 @@ class TestImplicitValidation:
         due to the Jacobian, but the step-count advantage is real.)
         """
         T = 0.05
-        dt_euler    = 0.001
+        dt_euler = 0.001
         dt_implicit = 0.01
 
-        steps_euler    = int(T / dt_euler)
+        steps_euler = int(T / dt_euler)
         steps_implicit = int(T / dt_implicit)
 
-        assert steps_implicit < steps_euler, (
-            "Implicit should need fewer steps than Euler for the same T"
-        )
+        assert (
+            steps_implicit < steps_euler
+        ), "Implicit should need fewer steps than Euler for the same T"
         # Confirm the ratio is at least 5× (conservative — actual is 10×)
-        assert steps_euler / steps_implicit >= 5, (
-            f"Step-count ratio {steps_euler/steps_implicit:.1f} < 5"
-        )
+        assert (
+            steps_euler / steps_implicit >= 5
+        ), f"Step-count ratio {steps_euler/steps_implicit:.1f} < 5"
 
     # ── 5.3.4 Implicit produces finite, physically-reasonable output ───────── #
 
     def test_implicit_output_physically_reasonable(self, grid_gsd):
         """After 10 steps at large dt, elevations stay within ±1 m of initial."""
         rbd = self._make(grid_gsd, "implicit", dt=0.5)
-        z0  = rbd._grid.at_node["topographic__elevation"].copy()
+        z0 = rbd._grid.at_node["topographic__elevation"].copy()
         for _ in range(10):
             rbd.run_one_step()
-        z1  = rbd._grid.at_node["topographic__elevation"]
+        z1 = rbd._grid.at_node["topographic__elevation"]
 
         assert np.all(np.isfinite(z1)), "Non-finite elevations after implicit steps"
         max_dz = np.abs(z1 - z0).max()
-        assert max_dz < 1.0, (
-            f"Elevation changed by {max_dz:.2f} m — physically unreasonable"
-        )
+        assert (
+            max_dz < 1.0
+        ), f"Elevation changed by {max_dz:.2f} m — physically unreasonable"
 
 
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Section 14 — Phase 6A.1: Soni (1981) aggradation validation                 #
 # ═══════════════════════════════════════════════════════════════════════════ #
+
 
 class TestSoniAggradation:
     """Physical validation against the Soni (1981) 1-D aggradation experiment.
@@ -2120,11 +2293,12 @@ class TestSoniAggradation:
         at the centre of the right column, giving a unique, unambiguous outlet.
         The bed slopes from left (upstream) to right (downstream).
         """
-        from landlab import RasterModelGrid, NodeStatus
+        from landlab import NodeStatus
+        from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
 
         nx, ny = 5, 5
-        dx     = 1.0
+        dx = 1.0
 
         grid = RasterModelGrid((ny, nx), xy_spacing=dx)
 
@@ -2143,20 +2317,23 @@ class TestSoniAggradation:
             left_is_closed=True,
             bottom_is_closed=True,
         )
-        outlet_node = (ny // 2) * nx + (nx - 1)   # centre of right column
+        outlet_node = (ny // 2) * nx + (nx - 1)  # centre of right column
         grid.status_at_node[outlet_node] = NodeStatus.FIXED_VALUE
 
         # Uniform flow sufficient for transport
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.3)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.3)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 1.0)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.3)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.3)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.0)
 
         gsd = [[32, 100], [16, 25], [8, 0]]
 
         rbd = RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="MPM",
-            dt=0.01, check_advective_cfl=False,
+            grid,
+            gsd=gsd,
+            bedload_equation="MPM",
+            dt=0.01,
+            check_advective_cfl=False,
         )
         return rbd, nx, ny, dx
 
@@ -2170,7 +2347,7 @@ class TestSoniAggradation:
         """Total interior elevation change equals net bedload in minus out."""
         rbd, nx, ny, dx = channel_rbd
         grid = rbd._grid
-        lp   = rbd._lambda_p
+        lp = rbd._lambda_p
 
         z0 = grid.at_node["topographic__elevation"].copy()
         self._run_steps(rbd, 20)
@@ -2185,9 +2362,7 @@ class TestSoniAggradation:
         assert np.isfinite(dV_bed), "Bed volume change is not finite"
         # The bed can aggrade or stay flat, but must not erode with pure feed
         # (within floating-point tolerance — allow a tiny numerical loss)
-        assert dV_bed >= -1e-10, (
-            f"Bed lost sediment unexpectedly: ΔV = {dV_bed:.3e} m³"
-        )
+        assert dV_bed >= -1e-10, f"Bed lost sediment unexpectedly: ΔV = {dV_bed:.3e} m³"
 
     # ── 6A.1.2  Monotone profile ─────────────────────────────────────────── #
 
@@ -2201,16 +2376,14 @@ class TestSoniAggradation:
 
         z = grid.at_node["topographic__elevation"]
         # Centre row node indices (row ny//2)
-        centre_row   = ny // 2
+        centre_row = ny // 2
         centre_nodes = np.array([centre_row * nx + c for c in range(nx)])
 
         z_profile = z[centre_nodes]
         # z should be non-increasing downstream (left → right)
         diffs = np.diff(z_profile)
         # Allow tiny numerical noise (1 µm tolerance)
-        assert np.all(diffs <= 1e-6), (
-            f"Bed profile is not monotone: diffs = {diffs}"
-        )
+        assert np.all(diffs <= 1e-6), f"Bed profile is not monotone: diffs = {diffs}"
 
     # ── 6A.1.3  Aggradation is positive ──────────────────────────────────── #
 
@@ -2225,9 +2398,9 @@ class TestSoniAggradation:
 
         dz = z1[grid.core_nodes] - z0[grid.core_nodes]
         # At least some interior nodes must have aggraded
-        assert np.any(dz > 1e-10), (
-            "No aggradation detected — sediment feed is not raising the bed"
-        )
+        assert np.any(
+            dz > 1e-10
+        ), "No aggradation detected — sediment feed is not raising the bed"
 
     # ── 6A.1.4  No spurious oscillations ─────────────────────────────────── #
 
@@ -2239,13 +2412,13 @@ class TestSoniAggradation:
         self._run_steps(rbd, 30)
 
         z = grid.at_node["topographic__elevation"]
-        centre_row   = ny // 2
+        centre_row = ny // 2
         centre_nodes = np.array([centre_row * nx + c for c in range(nx)])
-        z_profile    = z[centre_nodes]
+        z_profile = z[centre_nodes]
 
         # No oscillations: sign changes in second-difference should be rare.
         # Count sign changes in dz (first differences).
-        dz   = np.diff(z_profile)
+        dz = np.diff(z_profile)
         sign = np.sign(dz[dz != 0])
         if len(sign) > 1:
             sign_changes = np.sum(np.diff(sign) != 0)
@@ -2259,6 +2432,7 @@ class TestSoniAggradation:
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Section 15 — Phase 6A.2: Seal et al. (1997) gravel-sorting validation       #
 # ═══════════════════════════════════════════════════════════════════════════ #
+
 
 class TestSealGravelSorting:
     """Physical validation of GSD evolution against Seal et al. (1997).
@@ -2285,7 +2459,8 @@ class TestSealGravelSorting:
     @pytest.fixture
     def sorting_rbd(self):
         """5×5 grid with two-zone initial GSD: coarse upstream, mixed downstream."""
-        from landlab import RasterModelGrid, NodeStatus
+        from landlab import NodeStatus
+        from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
 
         nx, ny = 5, 5
@@ -2301,25 +2476,27 @@ class TestSealGravelSorting:
 
         # Single outlet: centre of right column
         grid.set_closed_boundaries_at_grid_edges(
-            right_is_closed=True, top_is_closed=True,
-            left_is_closed=True,  bottom_is_closed=True,
+            right_is_closed=True,
+            top_is_closed=True,
+            left_is_closed=True,
+            bottom_is_closed=True,
         )
         outlet = (ny // 2) * nx + (nx - 1)
         grid.status_at_node[outlet] = NodeStatus.FIXED_VALUE
 
         # Strong flow to drive sorting
-        grid.at_node["surface_water__depth"]    = np.full(grid.number_of_nodes, 0.4)
+        grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.4)
         grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 1.8)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.4)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.4)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.8)
 
         # Two GSD zones: col 0-1 is coarse-dominated (zone 0),
         #               col 2-4 is mixed gravel-sand (zone 1)
         gsd = [
-            [64, 100,  30],   # 64 mm  — 100 % in zone 0, 30 % in zone 1
-            [32,   0,  40],   # 32 mm  — absent in zone 0, 40 % in zone 1
-            [16,   0,  20],   # 16 mm
-            [ 8,   0,  10],   # 8 mm
+            [64, 100, 30],  # 64 mm  — 100 % in zone 0, 30 % in zone 1
+            [32, 0, 40],  # 32 mm  — absent in zone 0, 40 % in zone 1
+            [16, 0, 20],  # 16 mm
+            [8, 0, 10],  # 8 mm
         ]
         gsd_loc = [
             [0, 0, 1, 1, 1],
@@ -2330,23 +2507,25 @@ class TestSealGravelSorting:
         ]
 
         rbd = RiverBedDynamics(
-            grid, gsd=gsd,
+            grid,
+            gsd=gsd,
             bedload_equation="Parker1990",
             bed_surf__gsd_loc_node=gsd_loc,
             track_stratigraphy=True,
-            dt=0.05, check_advective_cfl=False,
+            dt=0.05,
+            check_advective_cfl=False,
             check_gsd_residual=False,  # extreme two-zone GSD contrast expected
         )
         return rbd, nx, ny
 
     def _d50_at_link(self, rbd):
         """Compute D50 [mm] at every link from the fractional GSD (0–1 scale)."""
-        gsd_F = rbd._bed_surf__gsd_link          # (n_links, n_grains), fractions 0-1
-        sizes = np.array([col[0] for col in rbd._gsd])   # grain sizes [mm]
-        cum   = np.cumsum(gsd_F, axis=1)         # cumulative fractions
-        d50   = np.zeros(gsd_F.shape[0])
+        gsd_F = rbd._bed_surf__gsd_link  # (n_links, n_grains), fractions 0-1
+        sizes = np.array([col[0] for col in rbd._gsd])  # grain sizes [mm]
+        cum = np.cumsum(gsd_F, axis=1)  # cumulative fractions
+        d50 = np.zeros(gsd_F.shape[0])
         for li in range(gsd_F.shape[0]):
-            if cum[li, -1] < 0.5:                # link not fully initialised
+            if cum[li, -1] < 0.5:  # link not fully initialised
                 d50[li] = np.nan
                 continue
             idx = np.searchsorted(cum[li], 0.5)
@@ -2373,8 +2552,10 @@ class TestSealGravelSorting:
         active = row_sums > 0.99
         assert active.any(), "No fully-initialised GSD links found"
         np.testing.assert_allclose(
-            row_sums[active], 1.0, atol=1e-6,
-            err_msg="GSD fractions do not sum to 1.0 at active links"
+            row_sums[active],
+            1.0,
+            atol=1e-6,
+            err_msg="GSD fractions do not sum to 1.0 at active links",
         )
 
     # ── 6A.2.2  Selective transport: fines dominate bedload ──────────────── #
@@ -2392,7 +2573,7 @@ class TestSealGravelSorting:
             rbd.run_one_step()
 
         # Bedload GSD at active links
-        qb_gsd = rbd._sed_transp__bedload_gsd_link   # (n_links, n_grains)
+        qb_gsd = rbd._sed_transp__bedload_gsd_link  # (n_links, n_grains)
         bed_gsd = rbd._bed_surf__gsd_link
 
         # Focus on interior links only (non-zero transport)
@@ -2401,7 +2582,7 @@ class TestSealGravelSorting:
             pytest.skip("No active transport links found")
 
         # Finest grain (last column)
-        qb_fine  = qb_gsd[active_links, -1].mean()
+        qb_fine = qb_gsd[active_links, -1].mean()
         bed_fine = bed_gsd[active_links, -1].mean()
 
         assert qb_fine >= bed_fine * 0.8, (
@@ -2434,23 +2615,22 @@ class TestSealGravelSorting:
         y = grid.y_of_node
         tail = grid.node_at_link_tail
         head = grid.node_at_link_head
-        is_horizontal = (
-            np.isclose(y[tail], y[head]) &          # same row
-            (np.abs(x[head] - x[tail]) < 1.5)       # adjacent columns
-        )
+        is_horizontal = np.isclose(y[tail], y[head]) & (  # same row
+            np.abs(x[head] - x[tail]) < 1.5
+        )  # adjacent columns
         h_links = np.where(is_horizontal)[0]
 
         # Split by column position: upstream = left half, downstream = right half
         mid_x = (x.min() + x.max()) / 2.0
         link_x = 0.5 * (x[tail[h_links]] + x[head[h_links]])
-        upstream_mask   = link_x <= mid_x
-        downstream_mask = link_x >  mid_x
+        upstream_mask = link_x <= mid_x
+        downstream_mask = link_x > mid_x
 
-        up_d50_vals   = d50[h_links[upstream_mask]]
+        up_d50_vals = d50[h_links[upstream_mask]]
         down_d50_vals = d50[h_links[downstream_mask]]
 
         # Keep only links where GSD was initialised (D50 is not NaN)
-        up_valid   = up_d50_vals[~np.isnan(up_d50_vals)]
+        up_valid = up_d50_vals[~np.isnan(up_d50_vals)]
         down_valid = down_d50_vals[~np.isnan(down_d50_vals)]
 
         assert up_valid.size > 0 and down_valid.size > 0, (
@@ -2458,7 +2638,7 @@ class TestSealGravelSorting:
             f"downstream: {down_valid.size}.  Check grid size or GSD initialisation."
         )
 
-        up_d50_mean   = up_valid.mean()
+        up_d50_mean = up_valid.mean()
         down_d50_mean = down_valid.mean()
 
         assert up_d50_mean >= down_d50_mean * 0.9, (
@@ -2471,7 +2651,9 @@ class TestSealGravelSorting:
     def test_both_equations_produce_sorting(self):
         """Parker1990 and WilcockCrowe2003 both produce GSD evolution."""
         import copy
-        from landlab import RasterModelGrid, NodeStatus
+
+        from landlab import NodeStatus
+        from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
 
         results = {}
@@ -2482,27 +2664,30 @@ class TestSealGravelSorting:
             z = np.array([slope * (nx - 1 - (n % nx)) for n in range(nx * ny)])
             grid.at_node["topographic__elevation"] = z.copy()
             grid.set_closed_boundaries_at_grid_edges(
-                right_is_closed=True, top_is_closed=True,
-                left_is_closed=True,  bottom_is_closed=True,
+                right_is_closed=True,
+                top_is_closed=True,
+                left_is_closed=True,
+                bottom_is_closed=True,
             )
             outlet = (ny // 2) * nx + (nx - 1)
             grid.status_at_node[outlet] = NodeStatus.FIXED_VALUE
 
-            grid.at_node["surface_water__depth"]    = np.full(nx * ny, 0.4)
+            grid.at_node["surface_water__depth"] = np.full(nx * ny, 0.4)
             grid.at_node["surface_water__velocity"] = np.full(nx * ny, 1.8)
-            grid.at_link["surface_water__depth"]    = np.full(
-                grid.number_of_links, 0.4)
-            grid.at_link["surface_water__velocity"] = np.full(
-                grid.number_of_links, 1.8)
+            grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.4)
+            grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.8)
 
             gsd = [[64, 100, 30], [32, 0, 40], [16, 0, 20], [8, 0, 10]]
             gsd_loc = [[0, 0, 1, 1, 1]] * 5
 
             rbd = RiverBedDynamics(
-                grid, gsd=gsd, bedload_equation=eq,
+                grid,
+                gsd=gsd,
+                bedload_equation=eq,
                 bed_surf__gsd_loc_node=gsd_loc,
                 track_stratigraphy=True,
-                dt=0.05, check_advective_cfl=False,
+                dt=0.05,
+                check_advective_cfl=False,
                 check_gsd_residual=False,  # extreme two-zone GSD contrast expected
             )
             gsd0 = rbd._bed_surf__gsd_link.copy()
@@ -2523,6 +2708,7 @@ class TestSealGravelSorting:
 # ═══════════════════════════════════════════════════════════════════════════ #
 # Section 16 — Phase 6A.3: Talmon et al. (1995) transverse slope validation   #
 # ═══════════════════════════════════════════════════════════════════════════ #
+
 
 class TestTalmonTransverseSlope:
     """Physical validation of gravitational diffusion against Talmon et al. (1995).
@@ -2551,7 +2737,8 @@ class TestTalmonTransverseSlope:
     @pytest.fixture
     def diffusion_rbd(self):
         """5×5 grid with transverse slope and constant-mode bed diffusion."""
-        from landlab import RasterModelGrid, NodeStatus
+        from landlab import NodeStatus
+        from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
 
         nx, ny = 5, 5
@@ -2568,22 +2755,26 @@ class TestTalmonTransverseSlope:
 
         # Single outlet at centre-right
         grid.set_closed_boundaries_at_grid_edges(
-            right_is_closed=True, top_is_closed=True,
-            left_is_closed=True,  bottom_is_closed=True,
+            right_is_closed=True,
+            top_is_closed=True,
+            left_is_closed=True,
+            bottom_is_closed=True,
         )
         outlet = (ny // 2) * nx + (nx - 1)
         grid.status_at_node[outlet] = NodeStatus.FIXED_VALUE
 
         # Longitudinal flow (left→right)
-        grid.at_node["surface_water__depth"]    = np.full(nx * ny, 0.3)
+        grid.at_node["surface_water__depth"] = np.full(nx * ny, 0.3)
         grid.at_node["surface_water__velocity"] = np.full(nx * ny, 1.2)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.3)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.3)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.2)
 
         gsd = [[32, 100], [16, 25], [8, 0]]
 
         rbd = RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="MPM",
+            grid,
+            gsd=gsd,
+            bedload_equation="MPM",
             dt=0.02,
             use_bed_diffusion=True,
             bed_diffusion_mode="constant",
@@ -2625,8 +2816,11 @@ class TestTalmonTransverseSlope:
             rbd.run_one_step()
             stds.append(self._transverse_std(rbd, nx, ny))
         # Allow tiny numerical noise (1 nm tolerance)
-        increases = [stds[i+1] - stds[i] for i in range(len(stds)-1)
-                     if stds[i+1] > stds[i] + 1e-12]
+        increases = [
+            stds[i + 1] - stds[i]
+            for i in range(len(stds) - 1)
+            if stds[i + 1] > stds[i] + 1e-12
+        ]
         assert len(increases) == 0, (
             f"Transverse gradient increased on {len(increases)} steps — "
             "diffusion is not acting monotonically."
@@ -2638,11 +2832,13 @@ class TestTalmonTransverseSlope:
         """Diffusion does not change mean elevation by more than 1 mm."""
         rbd, nx, ny, _ = diffusion_rbd
         z0_mean = rbd._grid.at_node["topographic__elevation"][
-            rbd._grid.core_nodes].mean()
+            rbd._grid.core_nodes
+        ].mean()
         for _ in range(30):
             rbd.run_one_step()
         z1_mean = rbd._grid.at_node["topographic__elevation"][
-            rbd._grid.core_nodes].mean()
+            rbd._grid.core_nodes
+        ].mean()
         assert abs(z1_mean - z0_mean) < 1e-3, (
             f"Mean elevation drifted by {abs(z1_mean-z0_mean):.2e} m — "
             "diffusion should not change domain-mean elevation."
@@ -2653,7 +2849,9 @@ class TestTalmonTransverseSlope:
     def test_stronger_diffusion_flattens_faster(self):
         """A larger diffusion coefficient produces a flatter profile sooner."""
         import copy
-        from landlab import RasterModelGrid, NodeStatus
+
+        from landlab import NodeStatus
+        from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
 
         def make(coeff):
@@ -2662,23 +2860,30 @@ class TestTalmonTransverseSlope:
             z = np.array([0.02 * (n // nx) for n in range(nx * ny)], float)
             grid.at_node["topographic__elevation"] = z.copy()
             grid.set_closed_boundaries_at_grid_edges(
-                right_is_closed=True, top_is_closed=True,
-                left_is_closed=True,  bottom_is_closed=True,
+                right_is_closed=True,
+                top_is_closed=True,
+                left_is_closed=True,
+                bottom_is_closed=True,
             )
             grid.status_at_node[(ny // 2) * nx + (nx - 1)] = NodeStatus.FIXED_VALUE
-            grid.at_node["surface_water__depth"]    = np.full(nx * ny, 0.3)
+            grid.at_node["surface_water__depth"] = np.full(nx * ny, 0.3)
             grid.at_node["surface_water__velocity"] = np.full(nx * ny, 1.2)
-            grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.3)
+            grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.3)
             grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.2)
             gsd = [[32, 100], [16, 25], [8, 0]]
             return RiverBedDynamics(
-                grid, gsd=gsd, bedload_equation="MPM", dt=0.02,
-                use_bed_diffusion=True, bed_diffusion_mode="constant",
+                grid,
+                gsd=gsd,
+                bedload_equation="MPM",
+                dt=0.02,
+                use_bed_diffusion=True,
+                bed_diffusion_mode="constant",
                 bed_diffusion_coeff=coeff,
-                check_advective_cfl=False, check_diffusion_cfl=False,
+                check_advective_cfl=False,
+                check_diffusion_cfl=False,
             )
 
-        rbd_weak   = make(0.01)
+        rbd_weak = make(0.01)
         rbd_strong = make(0.10)
 
         for _ in range(20):
@@ -2689,15 +2894,16 @@ class TestTalmonTransverseSlope:
             z = rbd._grid.at_node["topographic__elevation"][rbd._grid.core_nodes]
             return z.reshape(3, 3).std(axis=0).mean()
 
-        assert std(rbd_strong) < std(rbd_weak), (
-            "Stronger diffusion should produce a flatter transverse profile"
-        )
+        assert std(rbd_strong) < std(
+            rbd_weak
+        ), "Stronger diffusion should produce a flatter transverse profile"
 
     # ── 6A.3.5  No diffusion → gradient unchanged ────────────────────────── #
 
     def test_no_diffusion_gradient_unchanged(self):
         """Without diffusion, transverse gradient stays at initial value."""
-        from landlab import RasterModelGrid, NodeStatus
+        from landlab import NodeStatus
+        from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
 
         nx, ny = 5, 5
@@ -2705,18 +2911,23 @@ class TestTalmonTransverseSlope:
         z = np.array([0.02 * (n // nx) for n in range(nx * ny)], float)
         grid.at_node["topographic__elevation"] = z.copy()
         grid.set_closed_boundaries_at_grid_edges(
-            right_is_closed=True, top_is_closed=True,
-            left_is_closed=True,  bottom_is_closed=True,
+            right_is_closed=True,
+            top_is_closed=True,
+            left_is_closed=True,
+            bottom_is_closed=True,
         )
         grid.status_at_node[(ny // 2) * nx + (nx - 1)] = NodeStatus.FIXED_VALUE
-        grid.at_node["surface_water__depth"]    = np.full(nx * ny, 0.3)
+        grid.at_node["surface_water__depth"] = np.full(nx * ny, 0.3)
         grid.at_node["surface_water__velocity"] = np.full(nx * ny, 1.2)
-        grid.at_link["surface_water__depth"]    = np.full(grid.number_of_links, 0.3)
+        grid.at_link["surface_water__depth"] = np.full(grid.number_of_links, 0.3)
         grid.at_link["surface_water__velocity"] = np.full(grid.number_of_links, 1.2)
         gsd = [[32, 100], [16, 25], [8, 0]]
 
         rbd = RiverBedDynamics(
-            grid, gsd=gsd, bedload_equation="MPM", dt=0.02,
+            grid,
+            gsd=gsd,
+            bedload_equation="MPM",
+            dt=0.02,
             use_bed_diffusion=False,
             check_advective_cfl=False,
         )

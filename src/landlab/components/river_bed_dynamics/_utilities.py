@@ -201,9 +201,9 @@ def map_gsd_from_link_to_node(self, location="bed_surf"):
     else:
         gsd_l = self._sed_transp__bedload_gsd_link
 
-    n_links  = self._grid.number_of_links
+    n_links = self._grid.number_of_links
     n_grains = gsd_l.shape[1]
-    link_ids = self._grid.links_at_node           # (n_nodes, 4), -1 = missing
+    link_ids = self._grid.links_at_node  # (n_nodes, 4), -1 = missing
 
     # Pad gsd_l with one zero sentinel row so that index n_links is safe.
     # links_at_node uses -1 for missing links; Python's -1 indexing would
@@ -214,16 +214,16 @@ def map_gsd_from_link_to_node(self, location="bed_surf"):
     safe_ids = np.where(link_ids >= 0, link_ids, n_links)  # (n_nodes, 4)
 
     # Gather gsd values for every node's 4 surrounding links
-    gsd_gathered = gsd_padded[safe_ids]            # (n_nodes, 4, n_grains)
+    gsd_gathered = gsd_padded[safe_ids]  # (n_nodes, 4, n_grains)
 
     # Mask: link must both exist and carry non-zero GSD
     real_link = (link_ids >= 0)[:, :, np.newaxis]  # (n_nodes, 4, 1) → broadcasts
-    nonzero   = gsd_gathered > 0.0                 # (n_nodes, 4, n_grains)
-    mask      = real_link & nonzero                # (n_nodes, 4, n_grains)
+    nonzero = gsd_gathered > 0.0  # (n_nodes, 4, n_grains)
+    mask = real_link & nonzero  # (n_nodes, 4, n_grains)
 
     # Mean over the 4-link axis; default to 0 where no valid links exist
-    sum_vals  = np.sum(gsd_gathered * mask, axis=1)  # (n_nodes, n_grains)
-    count     = np.sum(mask,               axis=1)   # (n_nodes, n_grains)
+    sum_vals = np.sum(gsd_gathered * mask, axis=1)  # (n_nodes, n_grains)
+    count = np.sum(mask, axis=1)  # (n_nodes, n_grains)
     gsd_nodes = np.where(count > 0, sum_vals / count, 0.0)
 
     if location == "bed_surf":
@@ -464,40 +464,40 @@ def get_available_fields():
     fields = sorted(
         [
             # ── Original fields ──────────────────────────────────────────── #
-            ("rbd._bed_subsurf__gsd_link",                    "[mm,%]"),
-            ("rbd._bed_subsurf__gsd_node",                    "[mm,%]"),
-            ("rbd._bed_surf__act_layer_thick_link",           "[m]"),
+            ("rbd._bed_subsurf__gsd_link", "[mm,%]"),
+            ("rbd._bed_subsurf__gsd_node", "[mm,%]"),
+            ("rbd._bed_surf__act_layer_thick_link", "[m]"),
             ("rbd._bed_surf__act_layer_thick_prev_time_link", "[m]"),
-            ("rbd._bed_surf__elev_fix_node",                  "[m]"),
-            ("rbd._bed_surf__geom_mean_size_link",            "[mm]"),
-            ("rbd._bed_surf__geom_mean_size_node",            "[mm]"),
-            ("rbd._bed_surf__geo_std_size_link",              "[mm]"),
-            ("rbd._bed_surf__geo_std_size_node",              "[mm]"),
-            ("rbd._bed_surf__gsd_fix_node",                   "[mm,%]"),
-            ("rbd._bed_surf__gsd_link",                       "[mm,%]"),
-            ("rbd._bed_surf__gsd_node",                       "[mm,%]"),
-            ("rbd._bed_surf__gsd_orig_link",                  "[mm,%]"),
-            ("rbd._bed_surf__gsd_orig_node",                  "[mm,%]"),
-            ("rbd._bed_surf__median_size_link",               "[mm]"),
-            ("rbd._bed_surf__median_size_node",               "[mm]"),
-            ("rbd._bed_surf__sand_fract_link",                "[-]"),
-            ("rbd._bed_surf__sand_fract_node",                "[-]"),
-            ("rbd._bed_surf__thick_new_layer_link",           "[m]"),
-            ("rbd._sed_transp__bedload_gsd_fix_link",         "[mm,%]"),
-            ("rbd._sed_transp__bedload_gsd_link",             "[mm,%]"),
-            ("rbd._sed_transp__bedload_rate_link",            "[m^2/s]"),
-            ("rbd._sed_transp__net_bedload_node",             "[m^2/s]"),
-            ("rbd._sed_transp__bedload_rate_fix_link",        "[m^2/s]"),
-            ("rbd._surface_water__shear_stress_link",         "[Pa]"),
-            ("rbd._surface_water__velocity_prev_time_link",   "[m/s]"),
-            ("rbd._topogr__elev_orig_link",                   "[m]"),
-            ("rbd._topogr__elev_orig_node",                   "[m]"),
-            ("rbd._topogr__elev_subsurf_link",                "[m]"),
+            ("rbd._bed_surf__elev_fix_node", "[m]"),
+            ("rbd._bed_surf__geom_mean_size_link", "[mm]"),
+            ("rbd._bed_surf__geom_mean_size_node", "[mm]"),
+            ("rbd._bed_surf__geo_std_size_link", "[mm]"),
+            ("rbd._bed_surf__geo_std_size_node", "[mm]"),
+            ("rbd._bed_surf__gsd_fix_node", "[mm,%]"),
+            ("rbd._bed_surf__gsd_link", "[mm,%]"),
+            ("rbd._bed_surf__gsd_node", "[mm,%]"),
+            ("rbd._bed_surf__gsd_orig_link", "[mm,%]"),
+            ("rbd._bed_surf__gsd_orig_node", "[mm,%]"),
+            ("rbd._bed_surf__median_size_link", "[mm]"),
+            ("rbd._bed_surf__median_size_node", "[mm]"),
+            ("rbd._bed_surf__sand_fract_link", "[-]"),
+            ("rbd._bed_surf__sand_fract_node", "[-]"),
+            ("rbd._bed_surf__thick_new_layer_link", "[m]"),
+            ("rbd._sed_transp__bedload_gsd_fix_link", "[mm,%]"),
+            ("rbd._sed_transp__bedload_gsd_link", "[mm,%]"),
+            ("rbd._sed_transp__bedload_rate_link", "[m^2/s]"),
+            ("rbd._sed_transp__net_bedload_node", "[m^2/s]"),
+            ("rbd._sed_transp__bedload_rate_fix_link", "[m^2/s]"),
+            ("rbd._surface_water__shear_stress_link", "[Pa]"),
+            ("rbd._surface_water__velocity_prev_time_link", "[m/s]"),
+            ("rbd._topogr__elev_orig_link", "[m]"),
+            ("rbd._topogr__elev_orig_node", "[m]"),
+            ("rbd._topogr__elev_subsurf_link", "[m]"),
             # ── Phase 4C: GSD normalisation diagnostics ──────────────────── #
-            ("rbd._bed_surf__gsd_residual_max",               "[-]"),
-            ("rbd._bed_surf__gsd_residual_mean",              "[-]"),
+            ("rbd._bed_surf__gsd_residual_max", "[-]"),
+            ("rbd._bed_surf__gsd_residual_mean", "[-]"),
             # ── Phase 5: gravitational diffusion ─────────────────────────── #
-            ("rbd._bed_surf__diffusive_dz_node",              "[m]"),
+            ("rbd._bed_surf__diffusive_dz_node", "[m]"),
         ]
     )
 
