@@ -185,7 +185,7 @@ class RiverTemperatureDynamics(Component):
             "optional": False,
             "units": "m/s",
             "mapping": "link",
-            "doc": "Link-parallel advection velocity",
+            "doc": "Link-parallel advection velocity magnitude",
         },
         "air__temperature": {
             "dtype": float,
@@ -217,7 +217,7 @@ class RiverTemperatureDynamics(Component):
             "optional": False,
             "units": "W/m^2",
             "mapping": "node",
-            "doc": "Total incident shortwave radiation at the water surface",
+            "doc": "incident shortwave radiation",
         },
         "solar__altitude_angle": {
             "dtype": float,
@@ -241,7 +241,7 @@ class RiverTemperatureDynamics(Component):
             "optional": True,
             "units": "m/s",
             "mapping": "node",
-            "doc": "Specific discharge of groundwater into the channel (positive = gaining)",
+            "doc": "discharge per width in link dir",
         },
         "groundwater__temperature": {
             "dtype": float,
@@ -341,6 +341,7 @@ class RiverTemperatureDynamics(Component):
 
         # New mapping fields for upgraded physics
         self._C_cloud = self._grid.at_node["cloud_cover__fraction"]
+        #Specific discharge of groundwater into the channel (positive = gaining)
         self._q_gw = self._grid.at_node["groundwater__specific_discharge"]
         self._T_gw = self._grid.at_node["groundwater__temperature"]
         self._T_bed = self._grid.at_node["sediment__temperature"]
@@ -520,8 +521,9 @@ class RiverTemperatureDynamics(Component):
 
         # Apply cloud cover adjustment (1 + 0.17 * C^2)
         cloud_factor = 1.0 + 0.17 * (C_cloud**2)
-        Q_lw_in = self._sigma_lw_factor * \
-            (eps_a * self._sigma * (Ta + 273.15) ** 4 * cloud_factor)
+        Q_lw_in = self._sigma_lw_factor * (
+            eps_a * self._sigma * (Ta + 273.15) ** 4 * cloud_factor
+        )
 
         # 3. Longwave reflected
         Q_lw_reflected = 0.03 * Q_lw_in
