@@ -769,7 +769,7 @@ def test_rbd_approximate_solution():
     # 2. Aggradation occurred — upstream end rose relative to outlet
     assert z_real[-1] > z_real[1] + 5.0, (
         f"Expected upstream aggradation > 5 m above outlet; "
-        f"got {z_real[-1]:.2f} - {z_real[1]:.2f} = {z_real[-1]-z_real[1]:.2f} m"
+        f"got {z_real[-1]:.2f} - {z_real[1]:.2f} = {z_real[-1] - z_real[1]:.2f} m"
     )
 
     # 3. Profile is broadly monotone from outlet (row 1) to inlet (last row):
@@ -1012,7 +1012,6 @@ class TestRK2TimeIntegration:
     def _grid_and_gsd(self):
         """Minimal 5×5 grid with MPM equation and active transport."""
         from landlab import RasterModelGrid
-        from landlab.components import RiverBedDynamics
 
         grid = RasterModelGrid((5, 5), xy_spacing=1.0)
         grid.at_node["topographic__elevation"] = np.array(
@@ -1137,7 +1136,7 @@ class TestRK2TimeIntegration:
         # RK2 second-order should give ≥ 5× improvement at this dt
         assert err_rk2 < err_euler / 5, (
             f"RK2 should be at least 5× more accurate than Euler at dt={dt}; "
-            f"got RK2/Euler = {err_rk2/err_euler:.2f}"
+            f"got RK2/Euler = {err_rk2 / err_euler:.2f}"
         )
 
     def test_euler_first_order_convergence(self, _grid_and_gsd):
@@ -1242,16 +1241,16 @@ class TestTVDMinmodGSDAdvection:
     def test_invalid_scheme_raises(self, rbd_parker):
         """Unknown gsd_advection_scheme raises ValueError."""
         from landlab import RasterModelGrid
-        from landlab.components import RiverBedDynamics
 
         grid = RasterModelGrid((5, 5), xy_spacing=100.0)
         grid.at_node["topographic__elevation"] = np.ones(25)
         grid.set_closed_boundaries_at_grid_edges(True, True, True, True)
-        with pytest.raises(ValueError, match="gsd_advection_scheme"):
-            from landlab.components.river_bed_dynamics._gsd_evolver import (
-                ToroEscobarEvolver,
-            )
 
+        from landlab.components.river_bed_dynamics._gsd_evolver import (
+            ToroEscobarEvolver,
+        )
+
+        with pytest.raises(ValueError, match="gsd_advection_scheme"):
             ToroEscobarEvolver(gsd_advection_scheme="bogus")
 
     def test_tvd_runs_without_error(self, rbd_parker):
@@ -1261,7 +1260,6 @@ class TestTVDMinmodGSDAdvection:
         grid = rbd_parker._grid
         gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
         gsd_loc = [[0, 1, 1, 1, 0]] * 5
-        from landlab.grid.mappers import map_mean_of_link_nodes_to_link
 
         rbd2 = RiverBedDynamics(
             grid,
@@ -1988,7 +1986,7 @@ class TestAssembleImplicitSystem:
 # ═══════════════════════════════════════════════════════════════════════════ #
 
 
-class TestImplicitSolver:
+class TestImplicitSolverExecution:
     """Tests for time_stepping='implicit' (Phase 5.2b)."""
 
     @pytest.fixture
@@ -2192,12 +2190,6 @@ class TestImplicitValidation:
     def test_implicit_reaches_same_steady_state(self, grid_gsd):
         """Implicit (few large steps) and Euler (many small steps) converge
         to the same elevation field within 5 mm over the same total time."""
-        import copy
-
-        from landlab.components import RiverBedDynamics
-
-        T = 0.05  # total simulated time [s]
-
         # Euler: 50 steps at dt=0.001
         rbd_e = self._make(grid_gsd, "euler", 0.001)
         for _ in range(50):
@@ -2240,7 +2232,7 @@ class TestImplicitValidation:
         # Confirm the ratio is at least 5× (conservative — actual is 10×)
         assert (
             steps_euler / steps_implicit >= 5
-        ), f"Step-count ratio {steps_euler/steps_implicit:.1f} < 5"
+        ), f"Step-count ratio {steps_euler / steps_implicit:.1f} < 5"
 
     # ── 5.3.4 Implicit produces finite, physically-reasonable output ───────── #
 
@@ -2650,8 +2642,6 @@ class TestSealGravelSorting:
 
     def test_both_equations_produce_sorting(self):
         """Parker1990 and WilcockCrowe2003 both produce GSD evolution."""
-        import copy
-
         from landlab import NodeStatus
         from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
@@ -2840,7 +2830,7 @@ class TestTalmonTransverseSlope:
             rbd._grid.core_nodes
         ].mean()
         assert abs(z1_mean - z0_mean) < 1e-3, (
-            f"Mean elevation drifted by {abs(z1_mean-z0_mean):.2e} m — "
+            f"Mean elevation drifted by {abs(z1_mean - z0_mean):.2e} m — "
             "diffusion should not change domain-mean elevation."
         )
 
@@ -2848,8 +2838,6 @@ class TestTalmonTransverseSlope:
 
     def test_stronger_diffusion_flattens_faster(self):
         """A larger diffusion coefficient produces a flatter profile sooner."""
-        import copy
-
         from landlab import NodeStatus
         from landlab import RasterModelGrid
         from landlab.components import RiverBedDynamics
@@ -2932,13 +2920,11 @@ class TestTalmonTransverseSlope:
             check_advective_cfl=False,
         )
         z_core = rbd._grid.core_nodes
-        z0 = rbd._grid.at_node["topographic__elevation"][z_core].copy()
 
         for _ in range(10):
             rbd.run_one_step()
 
         z1 = rbd._grid.at_node["topographic__elevation"][z_core]
-        std0 = z0.reshape(3, 3).std(axis=0).mean()
         std1 = z1.reshape(3, 3).std(axis=0).mean()
 
         # Without diffusion, transverse std may change slightly due to
