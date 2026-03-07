@@ -1,4 +1,4 @@
-name: Draft PDF
+name: Draft PDF for new JOSS paper
 
 on:
   push:
