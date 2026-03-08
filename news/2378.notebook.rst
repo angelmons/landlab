@@ -1,0 +1,1 @@
+Added four tutorial notebooks for the RiverTemperatureDynamics component demonstrating analytical validation, a 24-hour river temperature cycle, and hydro-thermal coupling with both the RiverFlowDynamics and OverlandFlow components.

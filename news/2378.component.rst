@@ -1,0 +1,1 @@
+Added the new RiverTemperatureDynamics component to simulate two-dimensional depth-averaged river temperature dynamics and full atmospheric and subsurface energy budgets.
