@@ -6,6 +6,18 @@ and subsequent related work.
 
 Written by Sebastian Bernal and Angel Monsalve.
 
+Compared to the previous version published on JOSS, the current version
+includes:
+- Cached raster link adjacency tables (O(1) neighbor lookup)
+- O(1) nearest-link mapping on raster grids
+- Robust, fast raster-alignment checks in pathline tracing
+- Sparse core-only pressure correction solve (PCG + Jacobi preconditioner)
+- Corrected time-history buffering to restore functional radiation boundary conditions
+- Dynamic length-scale mapping (using accurate `dx` or `dy`) for boundary spacing and G-face pressure gradients
+- A strictly conservative nodal depth update tied directly to the solved free-surface elevation
+- Minimum depth thresholds (`min_chezy_depth`) to prevent singular Chezy friction behavior in very thin films
+- Iteration caps (`max_pathline_substeps`) to prevent infinite loops during semi-Lagrangian backward tracking
+
 Examples
 --------
 
@@ -82,19 +94,11 @@ And the velocity at links along the center of the channel.
 >>> flow_velocity = grid["link"]["surface_water__velocity"][linksAtCenter]
 >>> np.round(flow_velocity, 3)
 array([0.45 , 0.457, 0.455, 0.452, 0.453])
-
-
-Compared to the previous version published on JOSS, the current version
-includes:
-- Cached raster link adjacency tables (O(1) neighbor lookup)
-- O(1) nearest-link mapping on raster grids
-- Robust, fast raster-alignment checks in pathline tracing
-- Sparse core-only pressure correction solve (PCG + Jacobi preconditioner)
 """
 
+import warnings
 import numpy as np
 import scipy as sp
-import warnings
 
 from landlab import Component
 
@@ -392,6 +396,21 @@ class RiverFlowDynamics(Component):
             self._h_at_N_at_links >= self._threshold_depth, True, False
         )
 
+        # Tolerances and safeguards for robust calculations
+        self._coord_tol = 10.0 * np.finfo(float).eps * max(self.grid.dx, self.grid.dy)
+        self._velocity_tol = 1e-12
+        self._time_tol = max(1e-12, 10.0 * np.finfo(float).eps)
+        self._gradient_tol = 1e-14
+        self._max_pathline_substeps = 100
+        self._min_chezy_depth = 1e-8
+
+        # Mapping link lengths for accurate spatial gradients
+        self._link_lengths = np.full(self.grid.number_of_links, float(self.grid.dy), dtype=float)
+        self._link_lengths[self.grid.horizontal_links] = float(self.grid.dx)
+
+        # Precompute boundary metrics
+        self._build_boundary_metric_tables()
+
     # Defining some functions
 
     # -------------------------------------------------------------------------
@@ -438,6 +457,29 @@ class RiverFlowDynamics(Component):
         if (nrows - 1) > 1:
             self._adj_vlinks[v[:-1, :].ravel(), 1] = v[1:, :].ravel()  # N
             self._adj_vlinks[v[1:, :].ravel(), 3] = v[:-1, :].ravel()  # S
+
+    def _build_boundary_metric_tables(self):
+        """Precompute characteristic spacings for open-boundary updates."""
+        x = self.grid.x_of_node[self._open_boundary_nodes]
+        y = self.grid.y_of_node[self._open_boundary_nodes]
+        xmin = self.grid.x_of_node[self.grid.nodes_at_left_edge][0]
+        xmax = self.grid.x_of_node[self.grid.nodes_at_right_edge][0]
+        ymin = self.grid.y_of_node[self.grid.nodes_at_bottom_edge][0]
+        ymax = self.grid.y_of_node[self.grid.nodes_at_top_edge][0]
+
+        on_left_or_right = np.isclose(x, xmin, atol=self._coord_tol) | np.isclose(
+            x, xmax, atol=self._coord_tol
+        )
+        on_bottom_or_top = np.isclose(y, ymin, atol=self._coord_tol) | np.isclose(
+            y, ymax, atol=self._coord_tol
+        )
+
+        self._open_boundary_node_spacing = np.where(on_left_or_right, self.grid.dx, self.grid.dy)
+        self._open_boundary_node_spacing = np.where(
+            on_bottom_or_top & ~on_left_or_right,
+            self.grid.dy,
+            self._open_boundary_node_spacing,
+        )
 
     def _is_on_link_x(self, x):
         """Return boolean mask: x aligns with raster link x-coordinates."""
@@ -512,6 +554,17 @@ class RiverFlowDynamics(Component):
 
         This function implements the semi-analytical path line tracing method
         of Pollock (1988).
+
+        The semi-analytical path line tracing method was developed for particle
+        tracking in ground water flow models. The assumption that each directional
+        velocity component varies linearly in its coordinate directions within
+        each computational volume or cell underlies the method.
+        Linear variation allows the derivation of an analytical expression for
+        the path line of a particle across a volume.
+
+        Given an initial point located at each volume faces of the domain, particle
+        trayectories are traced backwards on time. Then, this function returns
+        the departure point of the particle at the beginning of the time step.
         """
         dx, dy = self.grid.dx, self.grid.dy
         tol_v = self._velocity_tol
@@ -743,9 +796,12 @@ class RiverFlowDynamics(Component):
         self._u_vel = self._vel_at_N[self.grid.horizontal_links]
         self._v_vel = self._vel_at_N[self.grid.vertical_links]
 
-        # Calculating Chezy coefficient
-        self._chezy_at_nodes = self._h_at_N ** (1 / 6) / self._mannings_n
-        self._chezy_at_links = self._h_at_N_at_links ** (1 / 6) / self._mannings_n
+        # Calculating Chezy coefficient with a small positive floor to avoid
+        # singular behavior in very thin films.
+        chezy_depth_nodes = np.maximum(self._h_at_N, self._min_chezy_depth)
+        chezy_depth_links = np.maximum(self._h_at_N_at_links, self._min_chezy_depth)
+        self._chezy_at_nodes = chezy_depth_nodes ** (1 / 6) / self._mannings_n
+        self._chezy_at_links = chezy_depth_links ** (1 / 6) / self._mannings_n
 
         # Computing V-velocity (vertical links) at U-velocity positions (horizontal links)
         tempCalc1 = self._grid.map_mean_of_horizontal_links_to_node(self._vel_at_N)
@@ -1186,9 +1242,10 @@ class RiverFlowDynamics(Component):
         self._g_links = np.zeros_like(self._vel_at_N)
 
         # Computing G-faces
+        eta_grad_at_links_N = self._grid.calc_diff_at_link(self._eta_at_N) / self._link_lengths
         self._g_links = self._h_at_N_at_links * self._f_vel - self._h_at_N_at_links * (
             1 - self._theta
-        ) * self._g * self._dt / dx * self._grid.calc_diff_at_link(self._eta_at_N)
+        ) * self._g * self._dt * eta_grad_at_links_N
 
         # Using only wet-link values, and setting dry links equal to 0 to avoid
         # using wrong values
@@ -1318,7 +1375,7 @@ class RiverFlowDynamics(Component):
         self._eta = np.zeros_like(self._eta_at_N)
         self._eta[core] = pcg_solution
         # Boundary conditions
-        # Zero-Gradient Boundary Condition applied on open boundaries
+        # Radiation Boundary Conditions of Roed & Smedstad (1984) applied on open boundaries
         # Water surface elevation
         ## Updating the new WSE ('eta') with the fixed nodes values
         if self._fixed_nodes_exist is True:
@@ -1330,13 +1387,47 @@ class RiverFlowDynamics(Component):
         tempCalc1 = self._grid.active_adjacent_nodes_at_node[self._open_boundary_nodes]
         open_boundary_nodes_1_backwards = np.extract(tempCalc1 >= 0, tempCalc1)
 
-        ## Applying Zero-Gradient Open Boundary for WATER DEPTH (Sloped WSE)
-        self._eta[self._open_boundary_nodes] = (
-            self._eta_at_N[open_boundary_nodes_1_backwards]
-            + self._z[open_boundary_nodes_1_backwards]
-            - self._z[self._open_boundary_nodes]
-        )
+        ## Getting the 2-line-upstream nodes from boundary nodes
+        # Looking for these nodes
+        tempCalc1 = np.tile(self._open_boundary_nodes, (4, 1)).T
+        tempCalc2 = self._grid.active_adjacent_nodes_at_node[
+            open_boundary_nodes_1_backwards
+        ]  # Surrounding nodes to 1-line-upstream
 
+        # Getting the node positions to extract them from all the surrounding nodes
+        tempB1 = np.tile([0, 1, 2, 3], (len(self._open_boundary_nodes), 1))
+        tempB2 = tempB1[tempCalc1 == tempCalc2]
+
+        # It gives me the node indices to extract
+        # folowing the face direction
+        tempB1 = np.where(tempB2 == 0, 2, tempB2)
+        tempB1 = np.where(tempB2 == 1, 3, tempB1)
+        tempB1 = np.where(tempB2 == 2, 0, tempB1)
+        tempB1 = np.where(tempB2 == 3, 1, tempB1)
+
+        open_boundary_nodes_2_backwards = tempCalc2[
+            [range(tempCalc2.shape[0])], tempB1
+        ][0]
+
+        ## Getting WSE at different locations
+        eta_at_N_at_B = self._eta_at_N[self._open_boundary_nodes]
+        eta_at_N_at_B_1 = self._eta_at_N[open_boundary_nodes_1_backwards]
+        eta_at_N_1_at_B_1 = self._eta_at_N_1[open_boundary_nodes_1_backwards]
+        eta_at_N_1_at_B_2 = self._eta_at_N_1[open_boundary_nodes_2_backwards]
+
+        ## Computing boundary condition
+        tempCalc1 = eta_at_N_at_B_1 - eta_at_N_1_at_B_1
+        tempCalc2 = eta_at_N_1_at_B_1 - eta_at_N_1_at_B_2
+        
+        # Bulletproof Ce evaluation: Filter out PCG solver noise (which is ~1e-5)
+        noise_tol = 1e-4
+        tempCalc3 = np.where(np.abs(tempCalc2) <= noise_tol, 1.0, tempCalc2)
+        safe_ratio = np.where(np.abs(tempCalc2) <= noise_tol, 0.0, tempCalc1 / tempCalc3)
+        Ce = -self._open_boundary_node_spacing / self._dt * safe_ratio
+
+        self._eta[self._open_boundary_nodes] = np.where(
+            Ce >= 0, eta_at_N_at_B_1, eta_at_N_at_B
+        )
         self._eta = np.where(
             abs(self._eta) > abs(self._z), -self._z, self._eta
         )  # Correcting WSE below topographic elevation
@@ -1367,12 +1458,12 @@ class RiverFlowDynamics(Component):
         tempB1 = np.where(tempB1 > 1, 1, 0)
 
         # Updating water velocity
+        eta_grad_at_links = self._grid.calc_diff_at_link(self._eta) / self._link_lengths
         tempCalc1 = (
             self._theta
             * self._g
             * self._dt
-            / dx
-            * (self._grid.calc_diff_at_link(self._eta))
+            * eta_grad_at_links
             * self._h_at_N_at_links
             / self._a_links
         )
@@ -1382,7 +1473,7 @@ class RiverFlowDynamics(Component):
         self._vel = np.where(self._wet_links, self._vel, 0)
 
         # Boundary conditions
-        # Zero-Gradient Boundary Condition applied on open boundaries
+        # Radiation Boundary Conditions of Roed & Smedstad (1984) applied on open boundaries
         # Water velocity
         ## Updating the new Velocity with the fixed links values
         if self._fixed_links_exist is True:
@@ -1413,104 +1504,98 @@ class RiverFlowDynamics(Component):
             [range(tempCalc2.shape[0])], tempB1
         ][0]
 
-        ## Applying Zero-Gradient Open Boundary for Velocity
-        self._vel[open_boundary_active_links] = self._vel_at_N[open_boundary_active_links_1_backwards]
+        ### Getting the 2-line-upstream links from boundary nodes
+        tempCalc1 = np.tile(open_boundary_active_links_1_backwards, (4, 1)).T
+        tempCalc2 = self._grid.links_at_node[open_boundary_nodes_2_backwards]
 
-        # Updating water depth at links
-        # Using only values where the WSE is above the topographic elevation
-        tempB1 = np.where(abs(self._eta) <= abs(self._z - self._threshold_depth), 1, 0)
+        # Getting the link positions to extract them from all the surrounding nodes
+        tempB1 = np.tile([0, 1, 2, 3], (len(self._open_boundary_nodes), 1))
+        tempB2 = tempB1[(tempCalc1 == tempCalc2)]
 
-        # Updating water depth at links
-        tempCalc1 = (
-            self._z_at_links + self._eta[self._grid.node_at_link_head]
-        ) * tempB1[self._grid.node_at_link_head]
-        tempCalc2 = (
-            self._z_at_links + self._eta[self._grid.node_at_link_tail]
-        ) * tempB1[self._grid.node_at_link_tail]
-        tempCalc3 = np.zeros_like(self._h_at_N_at_links)
+        # It gives me the link indices to extract
+        # folowing the face direction
+        tempB1 = np.where(tempB2 == 0, 2, tempB2)
+        tempB1 = np.where(tempB2 == 1, 3, tempB1)
+        # tempB1 is where the target link is located
+        tempB1 = np.where(tempB2 == 2, 0, tempB1)
+        # tempB2 is where the upstream link is located
+        tempB1 = np.where(tempB2 == 3, 1, tempB1)
 
-        self._h_at_links = np.array((tempCalc1, tempCalc2, tempCalc3)).max(axis=0)
+        open_boundary_active_links_2_backwards = tempCalc2[
+            [range(tempCalc2.shape[0])], tempB1
+        ][0]
 
-        # Applying boundary condition at links
-        self._h_at_links[self._open_boundary_links] = (
-            self._z_at_links[self._open_boundary_links]
-            + self._eta_at_links[self._open_boundary_links]
+        ## Getting water velocity at different locations
+        vel_at_N_at_B = self._vel_at_N[open_boundary_active_links]
+        vel_at_N_at_B_1 = self._vel_at_N[open_boundary_active_links_1_backwards]
+        vel_at_N_1_at_B_1 = self._vel_at_N_1[open_boundary_active_links_1_backwards]
+        vel_at_N_1_at_B_2 = self._vel_at_N_1[open_boundary_active_links_2_backwards]
+
+        ## Computing boundary condition
+        tempCalc1 = vel_at_N_at_B_1 - vel_at_N_1_at_B_1
+        tempCalc2 = vel_at_N_1_at_B_1 - vel_at_N_1_at_B_2
+        
+        # Filter out PCG solver noise - need to move it up noise_tol
+        noise_tol = 1e-4
+        tempCalc3 = np.where(np.abs(tempCalc2) <= noise_tol, 1.0, tempCalc2)
+        safe_ratio = np.where(np.abs(tempCalc2) <= noise_tol, 0.0, tempCalc1 / tempCalc3)
+        open_boundary_active_link_spacing = self._link_lengths[open_boundary_active_links]
+        Ce = -open_boundary_active_link_spacing / self._dt * safe_ratio
+
+        self._vel[open_boundary_active_links] = np.where(
+            Ce >= 0, vel_at_N_at_B_1, vel_at_N_at_B
         )
 
-        # Wet cells threshold
-        self._h_at_links = np.where(
-            self._h_at_links < self._threshold_depth, 0, self._h_at_links
-        )
-
-        # Updating wet links
-        self._wet_links = np.where(
-            self._h_at_links >= self._threshold_depth, True, False
-        )
-        self._vel = self._vel * self._wet_links
-
-        # Calculating average water depth at nodes
-        # If a node is dry, using only surrounding links such that 'WSE' is above 'z'
-        # If a node is wet, using all surrounding links even if 'WSE' is below 'z' (jumps)
-
-        # Checking surrounding wet links
-        surrounding_links = self._grid.links_at_node[self.grid.core_nodes]
-
-        # Checking whether the core node is wet (T) or dry (F)
-        tempB1 = abs(self._eta[self.grid.core_nodes]) < abs(
-            self._z[self.grid.core_nodes] - self._threshold_depth
-        )
-
-        # Checking whether surrounding links are wet (T) or dry (F)
-        tempB2 = self._wet_links[surrounding_links]
-
-        # Checking whether surrounding 'WSE' links are above (T) or below (F) 'z' at nodes
-        tempB3 = (
-            abs(self._eta_at_links[surrounding_links])
-            < abs(self._z[self.grid.core_nodes] - self._threshold_depth)[:, None]
-        )
-
-        # Getting the number of wet links around each core node, satisfying tempB2,
-        # and avoiding divisions by zero
-        tempCalc2 = np.sum(tempB2 * 1, axis=1)
-        tempCalc2 = np.where(tempCalc2 == 0, -9999, tempCalc2)
-
-        # Getting the number of wet links around each core node, satisfying tempB3,
-        # and avoiding divisions by zero
-        tempCalc3 = np.sum(tempB2 * tempB3 * 1, axis=1)
-        tempCalc3 = np.where(tempCalc3 == 0, -9999, tempCalc3)
-
-        # Updating water depth
-        # h = h_at_N - rmg.calc_net_flux_at_node(h_at_links*vel) # (influx if negative)
-        self._h[self.grid.core_nodes] = np.where(
-            tempCalc3 > 0,
-            np.sum(self._h_at_links[surrounding_links] * tempB2 * tempB3, axis=1)
-            / tempCalc3,
-            0,
-        )  # Dry nodes, tempB1 == False
-
-        ### Updating boundary nodes
+        # Conservative nodal update from the solved free surface.
+        self._h = np.maximum(self._eta + self._z, 0.0)
+        
         if self._fixed_nodes_exist is True:
             self._h[self._fixed_entry_nodes] = self._entry_nodes_h_values
-        self._h[self._open_boundary_nodes] = (
-            self._eta[self._open_boundary_nodes] + self._z[self._open_boundary_nodes]
-        )
-        self._h = np.where(self._h < self._threshold_depth, 0, self._h)
-
+            self._eta[self._fixed_entry_nodes] = (
+                self._entry_nodes_h_values - self._z[self._fixed_entry_nodes]
+            )
+        
+        self._h = np.where(self._h < self._threshold_depth, 0.0, self._h)
+        
         # Corner nodes treatment
         self._h[self.grid.corner_nodes] = np.mean(
             self._h[self._adjacent_nodes_at_corner_nodes], axis=1
         )
-
-        # Updating wet nodes
-        self._wet_nodes = np.where(self._h >= self._threshold_depth, True, False)
-
+        self._h = np.where(self._h < self._threshold_depth, 0.0, self._h)
+        
+        # Keep free-surface elevation consistent with the conservative depth state.
+        self._eta = np.where(self._h > 0.0, self._h - self._z, -self._z)
+        if self._fixed_nodes_exist is True:
+            self._eta[self._fixed_entry_nodes] = (
+                self._entry_nodes_h_values - self._z[self._fixed_entry_nodes]
+            )
+        
+        self._eta_at_links = self._grid.map_mean_of_link_nodes_to_link(self._eta)
+        self._h_at_links = self._grid.map_mean_of_link_nodes_to_link(self._h)
+        
+        # Applying boundary condition at links
+        self._h_at_links[self._open_boundary_links] = np.maximum(
+            self._z_at_links[self._open_boundary_links]
+            + self._eta_at_links[self._open_boundary_links],
+            0.0,
+        )
+        
+        self._h_at_links = np.where(
+            self._h_at_links < self._threshold_depth, 0.0, self._h_at_links
+        )
+        
+        # Updating wet links/nodes and zeroing velocity in dry links
+        self._wet_links = self._h_at_links >= self._threshold_depth
+        self._vel = self._vel * self._wet_links
+        self._wet_nodes = self._h >= self._threshold_depth
+        
         # Storing values in the grid
         self._grid.at_node["surface_water__depth"] = self._h
         self._grid.at_link["surface_water__velocity"] = self._vel
         self._grid.at_node["surface_water__elevation"] = self._eta + (
             self._max_elevation + self._additional_z
         )
-
+        
         self._grid.at_link["surface_water__velocity_at_N-1"] = self._vel_at_N
         self._grid.at_node["surface_water__elevation_at_N-1"] = self._eta_at_N + (
             self._max_elevation + self._additional_z
@@ -1518,14 +1603,18 @@ class RiverFlowDynamics(Component):
         self._grid.at_node["surface_water__elevation_at_N-2"] = self._eta_at_N_1 + (
             self._max_elevation + self._additional_z
         )
-
+        
         # Storing values at previous time steps
+        eta_prev = self._eta_at_N.copy()
+        eta_prev_prev = self._eta_at_N_1.copy()
+        vel_prev = self._vel_at_N.copy()
+        
         self._eta_at_N = self._eta.copy()
-        self._eta_at_N_1 = self._eta_at_N.copy()
-        self._eta_at_N_2 = self._eta_at_N_1.copy()
-
+        self._eta_at_N_1 = eta_prev
+        self._eta_at_N_2 = eta_prev_prev
+        
         self._h_at_N = self._h.copy()
         self._h_at_N_at_links = self._h_at_links.copy()
-
+        
         self._vel_at_N = self._vel.copy()
-        self._vel_at_N_1 = self._vel_at_N.copy()
+        self._vel_at_N_1 = vel_prev

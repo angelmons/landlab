@@ -65,6 +65,7 @@ def test(session: nox.Session) -> None:
         "--branch",
         "--module",
         "pytest",
+        *(session.posargs or ()),
         env={"PYTEST_ADDOPTS": os.environ.get("PYTEST_ADDOPTS", "-m 'not richdem'")},
     )
     session.run("coverage", "report", "--ignore-errors", "--show-missing")
