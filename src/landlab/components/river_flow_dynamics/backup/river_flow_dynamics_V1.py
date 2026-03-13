@@ -94,7 +94,6 @@ includes:
 
 import numpy as np
 import scipy as sp
-import warnings
 
 from landlab import Component
 
@@ -508,34 +507,31 @@ class RiverFlowDynamics(Component):
         raise ValueError("objective_links must be 'horizontal' or 'vertical'")
 
     def path_line_tracing(self):
-        """ Path line tracing algorithm.
+        """ " Path line tracing algorithm.
 
         This function implements the semi-analytical path line tracing method
         of Pollock (1988).
+
+        The semi-analytical path line tracing method was developed for particle
+        tracking in ground water flow models. The assumption that each directional
+        velocity component varies linearly in its coordinate directions within
+        each computational volume or cell underlies the method.
+        Linear variation allows the derivation of an analytical expression for
+        the path line of a particle across a volume.
+
+        Given an initial point located at each volume faces of the domain, particle
+        trayectories are traced backwards on time. Then, this function returns
+        the departure point of the particle at the beginning of the time step.
         """
         dx, dy = self.grid.dx, self.grid.dy
-        tol_v = self._velocity_tol
-        tol_g = self._gradient_tol
-        tol_x = self._coord_tol
 
+        # Calculating the partial time-step TAUx, TAUy, dt - sum_partial_times
         sum_partial_times = np.zeros_like(self._u_vel_of_particle)
-        remaining_time = np.maximum(self._dt - sum_partial_times, 0.0)
-        keep_tracing = remaining_time > self._time_tol
+        remaining_time = self._dt - sum_partial_times
+        keep_tracing = np.where(remaining_time > 0, True, False)
 
-        x_left = self._grid.x_of_node[self.grid.nodes_at_left_edge][0]
-        x_right = self._grid.x_of_node[self.grid.nodes_at_right_edge][0]
-        y_bottom = self._grid.y_of_node[self.grid.nodes_at_bottom_edge][0]
-        y_top = self._grid.y_of_node[self.grid.nodes_at_top_edge][0]
-
-        substep_count = 0
-        while np.any(keep_tracing):
-            substep_count += 1
-            if substep_count > self._max_pathline_substeps:
-                warnings.warn(
-                    "Pathline tracing reached max_pathline_substeps; clipping remaining tracing time.",
-                    RuntimeWarning,
-                )
-                break
+        while np.any(remaining_time > 0):
+            # Using the previous exit point as the new entry point
             self._x_of_particle = np.where(
                 keep_tracing, self._x_at_exit_point, self._x_of_particle
             )
@@ -543,10 +539,15 @@ class RiverFlowDynamics(Component):
                 keep_tracing, self._y_at_exit_point, self._y_of_particle
             )
 
+            # Checking if the particles departs (backwards) from a link position (True)
             tempBx = self._is_on_link_x(self._x_of_particle)
             tempBy = self._is_on_link_y(self._y_of_particle)
+
+            # True: particles depart from link-aligned positions.
+            # False: particles depart from interior cell locations.
             tempBxy = tempBx | tempBy
 
+            # Getting surrounding links for particles located inside a cell
             tempCalc1 = np.append(
                 np.array([self._x_of_particle]), np.array([self._y_of_particle]), axis=0
             )
@@ -554,6 +555,7 @@ class RiverFlowDynamics(Component):
             temp_links_from_node = self._grid.links_at_node[tempCalc2]
             nodes_from_particle = tempCalc2
 
+            # Getting surrounding links for particles located at link positions
             tempCalc1 = np.where(
                 self._u_vel_of_particle >= 0,
                 np.array([self._x_of_particle]) - dx / 10,
@@ -569,11 +571,13 @@ class RiverFlowDynamics(Component):
             temp_links_from_link = self._grid.links_at_node[tempCalc4]
             nodes_from_particle = np.where(tempBxy, tempCalc4, nodes_from_particle)
 
+            # Getting links around particle
             tempBxy = np.tile(tempBxy, 4).reshape(4, len(tempBxy)).T
             links_at_particle = np.where(
                 tempBxy, temp_links_from_link, temp_links_from_node
             )
 
+            # Defining links based on velocity direction
             link_at_x2 = np.where(
                 self._u_vel_of_particle >= 0,
                 links_at_particle[:, 0],
@@ -616,6 +620,7 @@ class RiverFlowDynamics(Component):
                 self._grid.y_of_node[nodes_from_particle] + dy / 2,
             )
 
+            # Getting velocity around the particle
             u_vel_at_x2 = np.where(
                 link_at_x2 >= 0, self._vel_at_N[link_at_x2], self._vel_at_N[link_at_x1]
             )
@@ -629,9 +634,11 @@ class RiverFlowDynamics(Component):
                 link_at_y1 >= 0, self._vel_at_N[link_at_y1], self._vel_at_N[link_at_y2]
             )
 
+            # Calculating gradients for path line tracing
             gradient_x_direction = (u_vel_at_x2 - u_vel_at_x1) / dx
             gradient_y_direction = (v_vel_at_y2 - v_vel_at_y1) / dy
 
+            # Calculating entry velocity for each particle
             self._u_vel_of_particle = u_vel_at_x2 - gradient_x_direction * (
                 x_at_x2 - self._x_of_particle
             )
@@ -639,72 +646,100 @@ class RiverFlowDynamics(Component):
                 y_at_y2 - self._y_of_particle
             )
             self._u_vel_of_particle = np.where(
-                np.abs(self._u_vel_of_particle) < tol_v, 0.0, self._u_vel_of_particle
+                self._u_vel_of_particle < 1e-10, 0, self._u_vel_of_particle
             )
             self._v_vel_of_particle = np.where(
-                np.abs(self._v_vel_of_particle) < tol_v, 0.0, self._v_vel_of_particle
+                self._v_vel_of_particle < 1e-10, 0, self._v_vel_of_particle
             )
 
-            TAUx = remaining_time.copy()
-            const_x = np.abs(gradient_x_direction) <= tol_g
-            valid_x = (
-                ~const_x
-                & (np.abs(self._u_vel_of_particle) > tol_v)
-                & (np.abs(u_vel_at_x1) > tol_v)
-                & ((self._u_vel_of_particle * u_vel_at_x1) > 0.0)
+            ### Calculation accoss x-direction
+            # Avoiding divisions by zero
+            tempCalc1 = np.where(
+                self._u_vel_of_particle == 0, 9999, self._u_vel_of_particle
             )
-            if np.any(valid_x):
-                ratio_x = np.abs(self._u_vel_of_particle[valid_x] / u_vel_at_x1[valid_x])
-                TAUx[valid_x] = np.abs(np.log(ratio_x) / gradient_x_direction[valid_x])
-            fallback_x = const_x & (np.abs(u_vel_at_x1) > tol_v)
-            TAUx[fallback_x] = np.abs(
-                (self._x_of_particle[fallback_x] - x_at_x1[fallback_x])
-                / u_vel_at_x1[fallback_x]
+            tempCalc2 = np.where(u_vel_at_x1 == 0, 9999, u_vel_at_x1)
+            tempCalc3 = np.where(gradient_x_direction == 0, 9999, gradient_x_direction)
+            TAUx = (1 / tempCalc3) * np.log(abs(tempCalc1 / tempCalc2))
+
+            # Calculation when gradient is equal to zero
+            tempCalc4 = abs((self._x_of_particle - x_at_x1) / tempCalc2)
+            TAUx = np.where(gradient_x_direction == 0, tempCalc4, TAUx)
+
+            # Calculation when:
+            # a) Uxp/Ux1 = 1,
+            # b) Uxp,Vyp = 0,
+            # c) Ux1,Vy1 = 0, and
+            # d) Uxp/Ux1, Vxp/Vy1 = -1
+            tempCalc5 = self._u_vel_of_particle / tempCalc2
+            TAUx = np.where(tempCalc5 == 1, tempCalc4, TAUx)
+            TAUx = np.where(self._u_vel_of_particle == 0, remaining_time, TAUx)
+            TAUx = np.where(u_vel_at_x1 == 0, remaining_time, TAUx)
+            TAUx = np.where(tempCalc5 < 0, remaining_time, TAUx)
+            TAUx = np.where(TAUx > self._dt, self._dt, TAUx)
+            TAUx = np.where(TAUx < 0, 0, TAUx)
+
+            ### Calculation across y-direction
+            # Avoiding divisions by zero
+            tempCalc1 = np.where(
+                self._v_vel_of_particle == 0, 9999, self._v_vel_of_particle
             )
-            TAUx = np.clip(TAUx, 0.0, remaining_time)
+            tempCalc2 = np.where(v_vel_at_y1 == 0, 9999, v_vel_at_y1)
+            tempCalc3 = np.where(gradient_y_direction == 0, 9999, gradient_y_direction)
+            TAUy = (1 / tempCalc3) * np.log(abs(tempCalc1 / tempCalc2))
 
-            TAUy = remaining_time.copy()
-            const_y = np.abs(gradient_y_direction) <= tol_g
-            valid_y = (
-                ~const_y
-                & (np.abs(self._v_vel_of_particle) > tol_v)
-                & (np.abs(v_vel_at_y1) > tol_v)
-                & ((self._v_vel_of_particle * v_vel_at_y1) > 0.0)
+            # Calculation when gradient is equal to zero
+            tempCalc4 = abs((self._y_of_particle - y_at_y1) / tempCalc2)
+            TAUy = np.where(gradient_y_direction == 0, tempCalc4, TAUy)
+
+            # Calculation when
+            # a) Vyp/Vy1 = 1,
+            # b) Uxp,Vyp = 0,
+            # c) Ux1,Vy1 = 0, and
+            # d) Uxp/Ux1, Vxp/Vy1 = -1
+            tempCalc5 = self._v_vel_of_particle / tempCalc2
+            TAUy = np.where(tempCalc5 == 1, tempCalc4, TAUy)
+            TAUy = np.where(self._v_vel_of_particle == 0, remaining_time, TAUy)
+            TAUy = np.where(v_vel_at_y1 == 0, remaining_time, TAUy)
+            TAUy = np.where(tempCalc5 < 0, remaining_time, TAUy)
+            TAUy = np.where(TAUy > self._dt, self._dt, TAUy)
+            TAUy = np.where(TAUy < 0, 0, TAUy)
+
+            # Obtaining TAU = min(TAUx, TAUy, (dt - sum_partial_times))
+            TAUx = abs(TAUx)
+            TAUy = abs(TAUy)
+            TAU = np.array((TAUx, TAUy, remaining_time)).min(axis=0)
+            # TAU  = np.where(TAU < 1e-10, 0, TAU)
+
+            # Calculating exit point Xe, Ye
+            tempCalc1 = np.where(gradient_x_direction == 0, 9999, gradient_x_direction)
+            tempCalc2 = np.where(gradient_y_direction == 0, 9999, gradient_y_direction)
+
+            # Exit point Xe (tempCalc3) and Ye (tempCalc4)
+            tempCalc3 = x_at_x2 - (1 / tempCalc1) * (
+                u_vel_at_x2
+                - self._u_vel_of_particle / np.exp(gradient_x_direction * TAU)
             )
-            if np.any(valid_y):
-                ratio_y = np.abs(self._v_vel_of_particle[valid_y] / v_vel_at_y1[valid_y])
-                TAUy[valid_y] = np.abs(np.log(ratio_y) / gradient_y_direction[valid_y])
-            fallback_y = const_y & (np.abs(v_vel_at_y1) > tol_v)
-            TAUy[fallback_y] = np.abs(
-                (self._y_of_particle[fallback_y] - y_at_y1[fallback_y])
-                / v_vel_at_y1[fallback_y]
+            tempCalc4 = y_at_y2 - (1 / tempCalc2) * (
+                v_vel_at_y2
+                - self._v_vel_of_particle / np.exp(gradient_y_direction * TAU)
             )
-            TAUy = np.clip(TAUy, 0.0, remaining_time)
-
-            TAU = np.minimum(np.minimum(TAUx, TAUy), remaining_time)
-
-            exp_x = np.exp(np.clip(gradient_x_direction * TAU, -700.0, 700.0))
-            exp_y = np.exp(np.clip(gradient_y_direction * TAU, -700.0, 700.0))
-
-            tempCalc3 = self._x_of_particle - u_vel_at_x2 * TAU
-            tempCalc4 = self._y_of_particle - v_vel_at_y2 * TAU
-
-            smooth_x = np.abs(gradient_x_direction) > tol_g
-            smooth_y = np.abs(gradient_y_direction) > tol_g
-            tempCalc3[smooth_x] = x_at_x2[smooth_x] - (
-                u_vel_at_x2[smooth_x]
-                - self._u_vel_of_particle[smooth_x] / exp_x[smooth_x]
-            ) / gradient_x_direction[smooth_x]
-            tempCalc4[smooth_y] = y_at_y2[smooth_y] - (
-                v_vel_at_y2[smooth_y]
-                - self._v_vel_of_particle[smooth_y] / exp_y[smooth_y]
-            ) / gradient_y_direction[smooth_y]
 
             tempCalc3 = np.where(
-                np.abs(self._u_vel_of_particle) <= tol_v, self._x_of_particle, tempCalc3
+                gradient_x_direction == 0,
+                self._x_of_particle - u_vel_at_x2 * TAU,
+                tempCalc3,
             )
             tempCalc4 = np.where(
-                np.abs(self._v_vel_of_particle) <= tol_v, self._y_of_particle, tempCalc4
+                gradient_y_direction == 0,
+                self._y_of_particle - v_vel_at_y2 * TAU,
+                tempCalc4,
+            )
+
+            tempCalc3 = np.where(
+                self._u_vel_of_particle == 0, self._x_of_particle, tempCalc3
+            )
+            tempCalc4 = np.where(
+                self._v_vel_of_particle == 0, self._y_of_particle, tempCalc4
             )
 
             self._x_at_exit_point = np.where(
@@ -714,26 +749,72 @@ class RiverFlowDynamics(Component):
                 keep_tracing, tempCalc4, self._y_at_exit_point
             )
 
+            # Updating sum of partial time-steps, TAU
             sum_partial_times = np.where(
                 keep_tracing, sum_partial_times + TAU, self._dt
             )
-            remaining_time = np.maximum(self._dt - sum_partial_times, 0.0)
 
-            static_particle = (
-                np.abs(self._x_of_particle - self._x_at_exit_point) < tol_x
-            ) & (
-                np.abs(self._y_of_particle - self._y_at_exit_point) < tol_x
+            # Checking remaining_time == 0 (dt = sum_partial_times)
+            remaining_time = np.where(
+                remaining_time == 0, 0, self._dt - sum_partial_times
             )
-            remaining_time = np.where(static_particle, 0.0, remaining_time)
 
-            hit_boundary = (
-                (self._x_at_exit_point <= x_left + tol_x)
-                | (self._x_at_exit_point >= x_right - tol_x)
-                | (self._y_at_exit_point <= y_bottom + tol_x)
-                | (self._y_at_exit_point >= y_top - tol_x)
+            # Correcting entry velocity
+            tempCalc1 = np.where(self._u_vel_of_particle == 0, 1, 0)
+            tempCalc2 = np.where(self._v_vel_of_particle == 0, 1, 0)
+            remaining_time = np.where((tempCalc1 * tempCalc2) == 1, 0, remaining_time)
+
+            # Correction for static particles
+            remaining_time = np.where(
+                abs(self._x_of_particle - self._x_at_exit_point) < 1e-7,
+                0,
+                remaining_time,
             )
-            remaining_time = np.where(hit_boundary, 0.0, remaining_time)
-            keep_tracing = remaining_time > self._time_tol
+            remaining_time = np.where(
+                abs(self._y_of_particle - self._y_at_exit_point) < 1e-7,
+                0,
+                remaining_time,
+            )
+
+            # Stop tracing if a particle hits the boundary
+            # Keep tracing for all particles
+            tempCalc1 = np.repeat(True, len(keep_tracing))
+            # Particle hits the left edge?
+            tempCalc2 = np.isin(
+                self._x_at_exit_point,
+                self._grid.x_of_node[self.grid.nodes_at_left_edge],
+            )
+            # If above True, stop tracing for that particle
+            tempCalc1 = np.where(tempCalc2, False, tempCalc1)
+            # Particle hits the right edge?
+            tempCalc2 = np.isin(
+                self._x_at_exit_point,
+                self._grid.x_of_node[self.grid.nodes_at_right_edge],
+            )
+            # If above True, stop tracing for that particle
+            tempCalc1 = np.where(tempCalc2, False, tempCalc1)
+            # Particle hits the top edge?
+            tempCalc2 = np.isin(
+                self._y_at_exit_point, self._grid.y_of_node[self.grid.nodes_at_top_edge]
+            )
+            # If above True, stop tracing for that particle
+            tempCalc1 = np.where(tempCalc2, False, tempCalc1)
+            # Particle hits the bottom edge?
+            tempCalc2 = np.isin(
+                self._y_at_exit_point,
+                self._grid.y_of_node[self.grid.nodes_at_bottom_edge],
+            )
+            # If above True, stop tracing for that particle
+            tempCalc1 = np.where(tempCalc2, False, tempCalc1)
+            # Where particles reach the boundary, remaining time is equal to zero
+            # remaining_time = np.where(not tempCalc1, 0, remaining_time)
+            remaining_time = np.where(~tempCalc1, 0, remaining_time)
+
+            # Updating on particles that need to traced backwards
+            keep_tracing = np.where(remaining_time > 0, True, False)
+
+            # WHILE "np.any(remaining_time > 0)" END
+        # DEF "path_line_tracing(self)" END
 
     def run_one_step(self):
         """Calculate water depth and water velocity for a time period dt."""
