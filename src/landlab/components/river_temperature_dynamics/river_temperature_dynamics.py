@@ -341,7 +341,7 @@ class RiverTemperatureDynamics(Component):
 
         # New mapping fields for upgraded physics
         self._C_cloud = self._grid.at_node["cloud_cover__fraction"]
-        #Specific discharge of groundwater into the channel (positive = gaining)
+        # Specific discharge of groundwater into the channel (positive = gaining)
         self._q_gw = self._grid.at_node["groundwater__specific_discharge"]
         self._T_gw = self._grid.at_node["groundwater__temperature"]
         self._T_bed = self._grid.at_node["sediment__temperature"]
