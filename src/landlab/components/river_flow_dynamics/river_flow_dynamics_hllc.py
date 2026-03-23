@@ -376,6 +376,14 @@ class RiverFlowDynamics_HLLC(Component):
         solver preserves the current local velocity when applying the outlet
         depth/stage (i.e., momentum is adjusted consistently with the imposed
         depth/stage).
+    outlet_max_depth : float or None, optional
+        Ramp-up outlet depth cap [m]. When set, the outlet depth is clamped
+        to ``min(h_local, outlet_max_depth)`` — the target depth is only
+        enforced once the local water depth reaches or exceeds this value.
+        This prevents the fixed-stage BC from pulling water out of a dry or
+        partially-wet outlet at the start of a simulation.
+        Applies only when ``fixed_exit_nodes`` is also provided.
+        Default ``None`` (standard hard Dirichlet outlet).
     wall_edges : set of str, optional
         Edges treated as **reflective walls** (zero normal velocity).
         Subset of ``{'left', 'right', 'bottom', 'top'}``.
@@ -492,6 +500,7 @@ class RiverFlowDynamics_HLLC(Component):
         exit_nodes_eta_values=None,
         exit_nodes_u_values=None,
         exit_nodes_v_values=None,
+        outlet_max_depth=None,
         wall_edges=None,
         update_link_fields=False,
     ):
@@ -624,6 +633,11 @@ class RiverFlowDynamics_HLLC(Component):
         else:
             self._exit_nodes = None
 
+        # Ramp-up outlet: only clamp depth when local h >= this threshold
+        self._outlet_max_depth = (
+            None if outlet_max_depth is None else float(outlet_max_depth)
+        )
+
         self._update_derived()
 
     # ──────────────────────────────────────────────────────────────────────
@@ -745,11 +759,20 @@ class RiverFlowDynamics_HLLC(Component):
             return
         r, c = self._exit_rows, self._exit_cols
 
-        # Determine imposed depth
+        # Determine imposed depth from eta or h target
         if self._exit_eta is not None:
             h_set = np.maximum(0.0, self._exit_eta - self._z[r, c])
         else:
             h_set = np.maximum(0.0, self._exit_h)
+
+        # Ramp-up: only clamp depth when local h has reached the target.
+        # While the outlet is still dry or shallower than the target,
+        # keep the local depth (transmissive behaviour) so no water is
+        # artificially created or destroyed at a dry/partial outlet.
+        if self._outlet_max_depth is not None:
+            h_local = self._h[r, c]
+            h_set = np.where(h_local >= self._outlet_max_depth,
+                             h_set, h_local)
 
         # Determine outlet momentum to impose.
         # If user supplies exit velocities, convert to momentum. Otherwise keep
@@ -765,7 +788,7 @@ class RiverFlowDynamics_HLLC(Component):
         else:
             hv_set = h_set * self._exit_v
 
-        self._h[r, c] = h_set
+        self._h[r, c]  = h_set
         self._hu[r, c] = hu_set
         self._hv[r, c] = hv_set
 
