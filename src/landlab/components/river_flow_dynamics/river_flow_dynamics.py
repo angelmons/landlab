@@ -75,7 +75,8 @@ Instantiating the Component. To check the names of the required inputs, use
 the 'input_var_names' class property.
 
 >>> RiverFlowDynamics.input_var_names
-('surface_water__depth', 'surface_water__elevation', 'surface_water__velocity', 'topographic__elevation')
+('surface_water__depth', 'surface_water__elevation',
+'surface_water__velocity', 'topographic__elevation')
 
 Initialize required fields:
 
@@ -127,6 +128,7 @@ array([0.45 , 0.457, 0.456, 0.451, 0.471])
 """
 
 import warnings
+
 import numpy as np
 import scipy as sp
 
@@ -199,7 +201,7 @@ class RiverFlowDynamics(Component):
             "optional": False,
             "units": "m/s",
             "mapping": "node",
-            "doc": "Node-averaged x-component of water velocity (from horizontal links)",
+            "doc": "Depth-averaged x-velocity",
         },
         "surface_water__y_velocity": {
             "dtype": float,
@@ -207,7 +209,7 @@ class RiverFlowDynamics(Component):
             "optional": False,
             "units": "m/s",
             "mapping": "node",
-            "doc": "Node-averaged y-component of water velocity (from vertical links)",
+            "doc": "Depth-averaged y-velocity",
         },
     }
 
@@ -326,7 +328,7 @@ class RiverFlowDynamics(Component):
 
         # ── User parameters ───────────────────────────────────────────────────
         self._dt = dt
-        self._elapsed_time = 0.0     # total simulated time [s], updated each step
+        self._elapsed_time = 0.0  # total simulated time [s], updated each step
         self._eddy_viscosity = eddy_viscosity
         self._g = sp.constants.g
         self._mannings_n = mannings_n
@@ -341,10 +343,10 @@ class RiverFlowDynamics(Component):
         self._time_tol = max(1e-12, 10.0 * np.finfo(float).eps)
         self._gradient_tol = 1e-14
         self._max_pathline_substeps = 100
-        self._min_chezy_depth = 1e-8   # floor for Chezy depth to prevent singularity
+        self._min_chezy_depth = 1e-8  # floor for Chezy depth to prevent singularity
 
         # ── Topography (virtual reference frame) ──────────────────────────────
-        self._additional_z = 10        # virtual datum offset so eta stays positive
+        self._additional_z = 10  # virtual datum offset so eta stays positive
         self._max_elevation = self._grid.at_node["topographic__elevation"].max()
         self._z = (
             self._max_elevation
@@ -354,9 +356,7 @@ class RiverFlowDynamics(Component):
 
         # ── Link length array (dx for horizontal links, dy for vertical links) ─
         # Used for correct spatial gradient calculation in G-faces and velocity update
-        self._link_lengths = np.full(
-            grid.number_of_links, float(grid.dy), dtype=float
-        )
+        self._link_lengths = np.full(grid.number_of_links, float(grid.dy), dtype=float)
         self._link_lengths[grid.horizontal_links] = float(grid.dx)
 
         # ── Entry / exit boundary node and link lists ─────────────────────────
@@ -372,22 +372,26 @@ class RiverFlowDynamics(Component):
         # ── Create grid fields if not already present ─────────────────────────
         if "surface_water__depth" not in grid.at_node:
             grid.add_zeros(
-                "surface_water__depth", at="node",
+                "surface_water__depth",
+                at="node",
                 units=self._info["surface_water__depth"]["units"],
             )
         if "surface_water__velocity" not in grid.at_link:
             grid.add_zeros(
-                "surface_water__velocity", at="link",
+                "surface_water__velocity",
+                at="link",
                 units=self._info["surface_water__velocity"]["units"],
             )
         if "surface_water__x_velocity" not in grid.at_node:
             grid.add_zeros(
-                "surface_water__x_velocity", at="node",
+                "surface_water__x_velocity",
+                at="node",
                 units=self._info["surface_water__x_velocity"]["units"],
             )
         if "surface_water__y_velocity" not in grid.at_node:
             grid.add_zeros(
-                "surface_water__y_velocity", at="node",
+                "surface_water__y_velocity",
+                at="node",
                 units=self._info["surface_water__y_velocity"]["units"],
             )
         # Aliasing guard: if the user passed topographic__elevation directly into
@@ -395,11 +399,13 @@ class RiverFlowDynamics(Component):
         # share the same underlying array. The [:] in-place write in _write_grid_fields
         # would then corrupt topographic__elevation. Break the alias here.
         if "surface_water__elevation" in grid.at_node:
-            if (grid.at_node["surface_water__elevation"] is
-                    grid.at_node["topographic__elevation"]):
-                grid.at_node["surface_water__elevation"] = (
-                    grid.at_node["surface_water__elevation"].copy()
-                )
+            if (
+                grid.at_node["surface_water__elevation"]
+                is grid.at_node["topographic__elevation"]
+            ):
+                grid.at_node["surface_water__elevation"] = grid.at_node[
+                    "surface_water__elevation"
+                ].copy()
 
         if "surface_water__elevation" not in grid.at_node:
             # BUG FIX: must store physical WSE = h + z_topo so that
@@ -437,20 +443,17 @@ class RiverFlowDynamics(Component):
         ).copy()
 
         # ── Live views into grid field arrays ─────────────────────────────────
-        self._h   = grid.at_node["surface_water__depth"]
+        self._h = grid.at_node["surface_water__depth"]
         self._vel = grid.at_link["surface_water__velocity"]
         self._vel_at_N_1 = self._surface_water__velocity_at_N_1
-        self._eta = (
-            grid.at_node["surface_water__elevation"]
-            - (self._max_elevation + self._additional_z)
+        self._eta = grid.at_node["surface_water__elevation"] - (
+            self._max_elevation + self._additional_z
         )
-        self._eta_at_N_1 = (
-            self._surface_water__elevation_at_N_1
-            - (self._max_elevation + self._additional_z)
+        self._eta_at_N_1 = self._surface_water__elevation_at_N_1 - (
+            self._max_elevation + self._additional_z
         )
-        self._eta_at_N_2 = (
-            self._surface_water__elevation_at_N_2
-            - (self._max_elevation + self._additional_z)
+        self._eta_at_N_2 = self._surface_water__elevation_at_N_2 - (
+            self._max_elevation + self._additional_z
         )
 
         # ── Open boundary conditions ──────────────────────────────────────────
@@ -464,10 +467,10 @@ class RiverFlowDynamics(Component):
 
         self._adjacent_nodes_at_corner_nodes = np.array(
             [
-                [grid.nodes_at_top_edge[-2],   grid.nodes_at_right_edge[-2]],  # TR
-                [grid.nodes_at_top_edge[1],    grid.nodes_at_left_edge[-2]],   # TL
-                [grid.nodes_at_left_edge[1],   grid.nodes_at_bottom_edge[1]],  # BL
-                [grid.nodes_at_right_edge[1],  grid.nodes_at_bottom_edge[-2]], # BR
+                [grid.nodes_at_top_edge[-2], grid.nodes_at_right_edge[-2]],  # TR
+                [grid.nodes_at_top_edge[1], grid.nodes_at_left_edge[-2]],  # TL
+                [grid.nodes_at_left_edge[1], grid.nodes_at_bottom_edge[1]],  # BL
+                [grid.nodes_at_right_edge[1], grid.nodes_at_bottom_edge[-2]],  # BR
             ]
         )
 
@@ -541,19 +544,26 @@ class RiverFlowDynamics(Component):
             x_min = grid.x_of_node.min()
             x_max = grid.x_of_node.max()
             y_min = grid.y_of_node.min()
-            y_max = grid.y_of_node.max()
             xn = grid.x_of_node[self._fixed_exit_nodes]
             yn = grid.y_of_node[self._fixed_exit_nodes]
 
-            dir_idx = np.where(np.isclose(xn, x_min), 0,   # left  → E
-                      np.where(np.isclose(xn, x_max), 2,   # right → W
-                      np.where(np.isclose(yn, y_min), 1,   # bottom→ N
-                               3)))                         # top   → S
+            dir_idx = np.where(
+                np.isclose(xn, x_min),
+                0,  # left  → E
+                np.where(
+                    np.isclose(xn, x_max),
+                    2,  # right → W
+                    np.where(np.isclose(yn, y_min), 1, 3),  # bottom→ N
+                ),
+            )  # top   → S
 
-            self._exit_interior_nbr = np.array([
-                grid.adjacent_nodes_at_node[node, d]
-                for node, d in zip(self._fixed_exit_nodes, dir_idx)
-            ], dtype=int)
+            self._exit_interior_nbr = np.array(
+                [
+                    grid.adjacent_nodes_at_node[node, d]
+                    for node, d in zip(self._fixed_exit_nodes, dir_idx)
+                ],
+                dtype=int,
+            )
 
         # ── Closed boundary nodes (impermeable walls on selected edge segments)
         # These nodes are excluded from the open-BC set and enforced dry (h = 0,
@@ -594,7 +604,7 @@ class RiverFlowDynamics(Component):
 
         # ── Apply Dirichlet inflow BCs to initial state ───────────────────────
         if self._fixed_nodes_exist:
-            self._h[self._fixed_entry_nodes]   = entry_nodes_h_values
+            self._h[self._fixed_entry_nodes] = entry_nodes_h_values
             self._eta[self._fixed_entry_nodes] = (
                 entry_nodes_h_values - self._z[self._fixed_entry_nodes]
             )
@@ -603,39 +613,33 @@ class RiverFlowDynamics(Component):
 
         # ── Apply initial dry state to closed boundary nodes ──────────────────
         if self._closed_nodes_exist:
-            self._eta[self._closed_boundary_nodes] = (
-                -self._z[self._closed_boundary_nodes]
-            )
+            self._eta[self._closed_boundary_nodes] = -self._z[
+                self._closed_boundary_nodes
+            ]
             self._h[self._closed_boundary_nodes] = 0.0
             self._vel[self._closed_boundary_links] = 0.0
 
         # ── Link-averaged topography and initial state ────────────────────────
-        self._z_at_links       = grid.map_mean_of_link_nodes_to_link(self._z)
-        self._h_at_links       = grid.map_mean_of_link_nodes_to_link(self._h)
-        self._eta_at_links     = self._h_at_links - self._z_at_links
+        self._z_at_links = grid.map_mean_of_link_nodes_to_link(self._z)
+        self._h_at_links = grid.map_mean_of_link_nodes_to_link(self._h)
+        self._eta_at_links = self._h_at_links - self._z_at_links
 
-        self._h_at_N           = self._h.copy()
-        self._h_at_N_at_links  = grid.map_mean_of_link_nodes_to_link(self._h_at_N)
-        self._vel_at_N         = self._vel.copy()
-        self._eta_at_N         = self._eta.copy()
+        self._h_at_N = self._h.copy()
+        self._h_at_N_at_links = grid.map_mean_of_link_nodes_to_link(self._h_at_N)
+        self._vel_at_N = self._vel.copy()
+        self._eta_at_N = self._eta.copy()
 
         self._wet_nodes = self._h_at_N >= self._threshold_depth
         self._wet_links = self._h_at_N_at_links >= self._threshold_depth
 
         # ── Precomputed topology masks (replaces O(N^2) list comprehensions) ──
-        self._is_active_horizontal = np.isin(
-            grid.active_links, grid.horizontal_links
-        )
+        self._is_active_horizontal = np.isin(grid.active_links, grid.horizontal_links)
         self._active_horizontal_links = grid.active_links[self._is_active_horizontal]
-        self._is_active_vertical      = ~self._is_active_horizontal
-        self._active_vertical_links   = grid.active_links[self._is_active_vertical]
+        self._is_active_vertical = ~self._is_active_horizontal
+        self._active_vertical_links = grid.active_links[self._is_active_vertical]
 
-        self._horizontal_is_active = np.isin(
-            grid.horizontal_links, grid.active_links
-        )
-        self._vertical_is_active = np.isin(
-            grid.vertical_links, grid.active_links
-        )
+        self._horizontal_is_active = np.isin(grid.horizontal_links, grid.active_links)
+        self._vertical_is_active = np.isin(grid.vertical_links, grid.active_links)
 
         # ── Precomputed sparse matrix topology (fixed by grid, reused every step)
         self._core_adjacent_nodes = grid.adjacent_nodes_at_node[grid.core_nodes]
@@ -645,9 +649,9 @@ class RiverFlowDynamics(Component):
             np.array([grid.core_nodes]).T,
             axis=1,
         )  # shape [N_core, 5]: E, N, W, S, Center
-        self._nodes_location      = _nodes_location
-        self._is_core_mask        = np.isin(_nodes_location, grid.core_nodes)
-        self._is_boundary_mask    = ~self._is_core_mask
+        self._nodes_location = _nodes_location
+        self._is_core_mask = np.isin(_nodes_location, grid.core_nodes)
+        self._is_boundary_mask = ~self._is_core_mask
 
     # ── Public properties ─────────────────────────────────────────────────────
 
@@ -703,10 +707,10 @@ class RiverFlowDynamics(Component):
         nrows, ncols = self.grid.shape
         self._nrows = int(nrows)
         self._ncols = int(ncols)
-        self._dx    = float(self.grid.dx)
-        self._dy    = float(self.grid.dy)
-        self._x0    = float(self.grid.x_of_node.min())
-        self._y0    = float(self.grid.y_of_node.min())
+        self._dx = float(self.grid.dx)
+        self._dy = float(self.grid.dy)
+        self._x0 = float(self.grid.x_of_node.min())
+        self._y0 = float(self.grid.y_of_node.min())
 
         # 2-D link-ID arrays for direct index arithmetic
         self._hlink_id = self.grid.horizontal_links.reshape((nrows, ncols - 1))
@@ -718,25 +722,25 @@ class RiverFlowDynamics(Component):
 
         # Horizontal-link adjacency
         h = self._hlink_id
-        self._adj_hlinks[h[:, :-1].ravel(), 0] = h[:, 1:].ravel()   # E
-        self._adj_hlinks[h[:, 1:].ravel(),  2] = h[:, :-1].ravel()  # W
+        self._adj_hlinks[h[:, :-1].ravel(), 0] = h[:, 1:].ravel()  # E
+        self._adj_hlinks[h[:, 1:].ravel(), 2] = h[:, :-1].ravel()  # W
         if nrows > 1:
             self._adj_hlinks[h[:-1, :].ravel(), 1] = h[1:, :].ravel()  # N
-            self._adj_hlinks[h[1:, :].ravel(),  3] = h[:-1, :].ravel() # S
+            self._adj_hlinks[h[1:, :].ravel(), 3] = h[:-1, :].ravel()  # S
 
         # Vertical-link adjacency
         v = self._vlink_id
-        self._adj_vlinks[v[:, :-1].ravel(), 0] = v[:, 1:].ravel()   # E
-        self._adj_vlinks[v[:, 1:].ravel(),  2] = v[:, :-1].ravel()  # W
+        self._adj_vlinks[v[:, :-1].ravel(), 0] = v[:, 1:].ravel()  # E
+        self._adj_vlinks[v[:, 1:].ravel(), 2] = v[:, :-1].ravel()  # W
         if (nrows - 1) > 1:
             self._adj_vlinks[v[:-1, :].ravel(), 1] = v[1:, :].ravel()  # N
-            self._adj_vlinks[v[1:, :].ravel(),  3] = v[:-1, :].ravel() # S
+            self._adj_vlinks[v[1:, :].ravel(), 3] = v[:-1, :].ravel()  # S
 
     def _is_on_link_x(self, x):
         """Boolean mask: x-coordinate aligns with raster link x-positions."""
-        x   = np.asarray(x, dtype=float)
+        x = np.asarray(x, dtype=float)
         tol = 10.0 * np.finfo(float).eps * max(self._dx, self._dy)
-        fx  = ((x - self._x0) / self._dx) % 1.0
+        fx = ((x - self._x0) / self._dx) % 1.0
         return (
             (np.abs(fx - 0.0) < tol / self._dx)
             | (np.abs(fx - 0.5) < tol / self._dx)
@@ -745,9 +749,9 @@ class RiverFlowDynamics(Component):
 
     def _is_on_link_y(self, y):
         """Boolean mask: y-coordinate aligns with raster link y-positions."""
-        y   = np.asarray(y, dtype=float)
+        y = np.asarray(y, dtype=float)
         tol = 10.0 * np.finfo(float).eps * max(self._dx, self._dy)
-        fy  = ((y - self._y0) / self._dy) % 1.0
+        fy = ((y - self._y0) / self._dy) % 1.0
         return (
             (np.abs(fy - 0.0) < tol / self._dy)
             | (np.abs(fy - 0.5) < tol / self._dy)
@@ -769,8 +773,8 @@ class RiverFlowDynamics(Component):
         ndarray of int
             Link IDs nearest to each query point.
         """
-        x  = np.asarray(x_coordinates, dtype=float)
-        y  = np.asarray(y_coordinates, dtype=float)
+        x = np.asarray(x_coordinates, dtype=float)
+        y = np.asarray(y_coordinates, dtype=float)
         dx, dy = self._dx, self._dy
         x0, y0 = self._x0, self._y0
 
@@ -827,8 +831,8 @@ class RiverFlowDynamics(Component):
         dx, dy = self.grid.dx, self.grid.dy
 
         sum_partial_times = np.zeros_like(self._u_vel_of_particle)
-        remaining_time    = self._dt - sum_partial_times
-        keep_tracing      = remaining_time > 0
+        remaining_time = self._dt - sum_partial_times
+        keep_tracing = remaining_time > 0
 
         substep_count = 0
         while np.any(remaining_time > 0):
@@ -851,14 +855,13 @@ class RiverFlowDynamics(Component):
             )
 
             # Detect particles on link positions vs. cell interiors
-            tempBx  = self._is_on_link_x(self._x_of_particle)
-            tempBy  = self._is_on_link_y(self._y_of_particle)
+            tempBx = self._is_on_link_x(self._x_of_particle)
+            tempBy = self._is_on_link_y(self._y_of_particle)
             tempBxy = tempBx | tempBy
 
             # Surrounding links for interior particles (mode="clip" prevents exceptions)
             xy_stack1 = np.append(
-                np.array([self._x_of_particle]),
-                np.array([self._y_of_particle]), axis=0
+                np.array([self._x_of_particle]), np.array([self._y_of_particle]), axis=0
             )
             nodes_interior = self._grid.find_nearest_node(xy_stack1, mode="clip")
             temp_links_interior = self._grid.links_at_node[nodes_interior]
@@ -887,27 +890,47 @@ class RiverFlowDynamics(Component):
             )
 
             # Assign face links based on velocity direction
-            link_x2 = np.where(self._u_vel_of_particle >= 0,
-                                links_at_particle[:, 0], links_at_particle[:, 2])
-            link_x1 = np.where(self._u_vel_of_particle >= 0,
-                                links_at_particle[:, 2], links_at_particle[:, 0])
-            link_y2 = np.where(self._v_vel_of_particle >= 0,
-                                links_at_particle[:, 1], links_at_particle[:, 3])
-            link_y1 = np.where(self._v_vel_of_particle >= 0,
-                                links_at_particle[:, 3], links_at_particle[:, 1])
+            link_x2 = np.where(
+                self._u_vel_of_particle >= 0,
+                links_at_particle[:, 0],
+                links_at_particle[:, 2],
+            )
+            link_x1 = np.where(
+                self._u_vel_of_particle >= 0,
+                links_at_particle[:, 2],
+                links_at_particle[:, 0],
+            )
+            link_y2 = np.where(
+                self._v_vel_of_particle >= 0,
+                links_at_particle[:, 1],
+                links_at_particle[:, 3],
+            )
+            link_y1 = np.where(
+                self._v_vel_of_particle >= 0,
+                links_at_particle[:, 3],
+                links_at_particle[:, 1],
+            )
 
             xn = self._grid.x_of_node[nodes_from_particle]
             yn = self._grid.y_of_node[nodes_from_particle]
-            x_at_x2 = np.where(self._u_vel_of_particle >= 0, xn + dx/2, xn - dx/2)
-            x_at_x1 = np.where(self._u_vel_of_particle >= 0, xn - dx/2, xn + dx/2)
-            y_at_y2 = np.where(self._v_vel_of_particle >= 0, yn + dy/2, yn - dy/2)
-            y_at_y1 = np.where(self._v_vel_of_particle >= 0, yn - dy/2, yn + dy/2)
+            x_at_x2 = np.where(self._u_vel_of_particle >= 0, xn + dx / 2, xn - dx / 2)
+            x_at_x1 = np.where(self._u_vel_of_particle >= 0, xn - dx / 2, xn + dx / 2)
+            y_at_y2 = np.where(self._v_vel_of_particle >= 0, yn + dy / 2, yn - dy / 2)
+            y_at_y1 = np.where(self._v_vel_of_particle >= 0, yn - dy / 2, yn + dy / 2)
 
             # Face velocities (fallback to opposite face when link index is -1)
-            u_at_x2 = np.where(link_x2 >= 0, self._vel_at_N[link_x2], self._vel_at_N[link_x1])
-            u_at_x1 = np.where(link_x1 >= 0, self._vel_at_N[link_x1], self._vel_at_N[link_x2])
-            v_at_y2 = np.where(link_y2 >= 0, self._vel_at_N[link_y2], self._vel_at_N[link_y1])
-            v_at_y1 = np.where(link_y1 >= 0, self._vel_at_N[link_y1], self._vel_at_N[link_y2])
+            u_at_x2 = np.where(
+                link_x2 >= 0, self._vel_at_N[link_x2], self._vel_at_N[link_x1]
+            )
+            u_at_x1 = np.where(
+                link_x1 >= 0, self._vel_at_N[link_x1], self._vel_at_N[link_x2]
+            )
+            v_at_y2 = np.where(
+                link_y2 >= 0, self._vel_at_N[link_y2], self._vel_at_N[link_y1]
+            )
+            v_at_y1 = np.where(
+                link_y1 >= 0, self._vel_at_N[link_y1], self._vel_at_N[link_y2]
+            )
 
             grad_x = (u_at_x2 - u_at_x1) / dx
             grad_y = (v_at_y2 - v_at_y1) / dy
@@ -923,9 +946,11 @@ class RiverFlowDynamics(Component):
             )
 
             # ── TAUx: x-direction partial time ───────────────────────────────
-            safe_ux  = np.where(self._u_vel_of_particle == 0, 9999.0, self._u_vel_of_particle)
+            safe_ux = np.where(
+                self._u_vel_of_particle == 0, 9999.0, self._u_vel_of_particle
+            )
             safe_ux1 = np.where(u_at_x1 == 0, 9999.0, u_at_x1)
-            safe_gx  = np.where(grad_x == 0, 9999.0, grad_x)
+            safe_gx = np.where(grad_x == 0, 9999.0, grad_x)
             TAUx = (1.0 / safe_gx) * np.log(np.abs(safe_ux / safe_ux1))
 
             dist_x = np.abs((self._x_of_particle - x_at_x1) / safe_ux1)
@@ -933,14 +958,16 @@ class RiverFlowDynamics(Component):
             ratio_x = self._u_vel_of_particle / safe_ux1
             TAUx = np.where(ratio_x == 1, dist_x, TAUx)
             TAUx = np.where(self._u_vel_of_particle == 0, remaining_time, TAUx)
-            TAUx = np.where(u_at_x1 == 0,              remaining_time, TAUx)
-            TAUx = np.where(ratio_x < 0,               remaining_time, TAUx)
+            TAUx = np.where(u_at_x1 == 0, remaining_time, TAUx)
+            TAUx = np.where(ratio_x < 0, remaining_time, TAUx)
             TAUx = np.clip(np.abs(TAUx), 0, self._dt)
 
             # ── TAUy: y-direction partial time ───────────────────────────────
-            safe_vy  = np.where(self._v_vel_of_particle == 0, 9999.0, self._v_vel_of_particle)
+            safe_vy = np.where(
+                self._v_vel_of_particle == 0, 9999.0, self._v_vel_of_particle
+            )
             safe_vy1 = np.where(v_at_y1 == 0, 9999.0, v_at_y1)
-            safe_gy  = np.where(grad_y == 0, 9999.0, grad_y)
+            safe_gy = np.where(grad_y == 0, 9999.0, grad_y)
             TAUy = (1.0 / safe_gy) * np.log(np.abs(safe_vy / safe_vy1))
 
             dist_y = np.abs((self._y_of_particle - y_at_y1) / safe_vy1)
@@ -948,8 +975,8 @@ class RiverFlowDynamics(Component):
             ratio_y = self._v_vel_of_particle / safe_vy1
             TAUy = np.where(ratio_y == 1, dist_y, TAUy)
             TAUy = np.where(self._v_vel_of_particle == 0, remaining_time, TAUy)
-            TAUy = np.where(v_at_y1 == 0,              remaining_time, TAUy)
-            TAUy = np.where(ratio_y < 0,               remaining_time, TAUy)
+            TAUy = np.where(v_at_y1 == 0, remaining_time, TAUy)
+            TAUy = np.where(ratio_y < 0, remaining_time, TAUy)
             TAUy = np.clip(np.abs(TAUy), 0, self._dt)
 
             # Minimum partial time step
@@ -982,8 +1009,12 @@ class RiverFlowDynamics(Component):
             self._y_at_exit_point = np.where(keep_tracing, ye, self._y_at_exit_point)
 
             # ── Update remaining time ─────────────────────────────────────────
-            sum_partial_times = np.where(keep_tracing, sum_partial_times + TAU, self._dt)
-            remaining_time    = np.where(remaining_time == 0, 0.0, self._dt - sum_partial_times)
+            sum_partial_times = np.where(
+                keep_tracing, sum_partial_times + TAU, self._dt
+            )
+            remaining_time = np.where(
+                remaining_time == 0, 0.0, self._dt - sum_partial_times
+            )
 
             # Stop particles that are stationary
             both_zero = (self._u_vel_of_particle == 0) & (self._v_vel_of_particle == 0)
@@ -992,22 +1023,31 @@ class RiverFlowDynamics(Component):
             # Stop particles that have not moved
             remaining_time = np.where(
                 np.abs(self._x_of_particle - self._x_at_exit_point) < self._coord_tol,
-                0.0, remaining_time,
+                0.0,
+                remaining_time,
             )
             remaining_time = np.where(
                 np.abs(self._y_of_particle - self._y_at_exit_point) < self._coord_tol,
-                0.0, remaining_time,
+                0.0,
+                remaining_time,
             )
 
             # Stop particles that hit a domain edge
-            at_left   = np.isin(self._x_at_exit_point,
-                                 self._grid.x_of_node[self.grid.nodes_at_left_edge])
-            at_right  = np.isin(self._x_at_exit_point,
-                                 self._grid.x_of_node[self.grid.nodes_at_right_edge])
-            at_top    = np.isin(self._y_at_exit_point,
-                                 self._grid.y_of_node[self.grid.nodes_at_top_edge])
-            at_bottom = np.isin(self._y_at_exit_point,
-                                 self._grid.y_of_node[self.grid.nodes_at_bottom_edge])
+            at_left = np.isin(
+                self._x_at_exit_point,
+                self._grid.x_of_node[self.grid.nodes_at_left_edge],
+            )
+            at_right = np.isin(
+                self._x_at_exit_point,
+                self._grid.x_of_node[self.grid.nodes_at_right_edge],
+            )
+            at_top = np.isin(
+                self._y_at_exit_point, self._grid.y_of_node[self.grid.nodes_at_top_edge]
+            )
+            at_bottom = np.isin(
+                self._y_at_exit_point,
+                self._grid.y_of_node[self.grid.nodes_at_bottom_edge],
+            )
             at_edge = at_left | at_right | at_top | at_bottom
             remaining_time = np.where(at_edge, 0.0, remaining_time)
 
@@ -1032,13 +1072,16 @@ class RiverFlowDynamics(Component):
         self._v_vel = self._vel_at_N[self.grid.vertical_links]
 
         # Cross-component velocity interpolation to face centres
-        u_mean_at_nodes = self._grid.map_mean_of_horizontal_links_to_node(self._vel_at_N)
+        u_mean_at_nodes = self._grid.map_mean_of_horizontal_links_to_node(
+            self._vel_at_N
+        )
         self._u_vel_at_v_links = np.mean(
             u_mean_at_nodes[self._grid.nodes_at_link[self.grid.vertical_links]], axis=1
         )
         v_mean_at_nodes = self._grid.map_mean_of_vertical_links_to_node(self._vel_at_N)
         self._v_vel_at_u_links = np.mean(
-            v_mean_at_nodes[self._grid.nodes_at_link[self.grid.horizontal_links]], axis=1
+            v_mean_at_nodes[self._grid.nodes_at_link[self.grid.horizontal_links]],
+            axis=1,
         )
 
         # ── Frictionless shortcut (mannings_n == 0) ───────────────────────────
@@ -1067,7 +1110,8 @@ class RiverFlowDynamics(Component):
         self._a_links = np.zeros_like(self._vel_at_N)
         self._a_links[self.grid.horizontal_links] = (
             self._h_at_N_at_links[self.grid.horizontal_links]
-            + self._g * self._dt
+            + self._g
+            * self._dt
             * np.hypot(
                 self._vel_at_N[self.grid.horizontal_links],
                 self._v_vel_at_u_links,
@@ -1076,7 +1120,8 @@ class RiverFlowDynamics(Component):
         )
         self._a_links[self.grid.vertical_links] = (
             self._h_at_N_at_links[self.grid.vertical_links]
-            + self._g * self._dt
+            + self._g
+            * self._dt
             * np.hypot(
                 self._vel_at_N[self.grid.vertical_links],
                 self._u_vel_at_v_links,
@@ -1091,12 +1136,12 @@ class RiverFlowDynamics(Component):
         dx, dy = self.grid.dx, self.grid.dy
 
         # Particle start positions at active horizontal link centres
-        self._x_of_particle    = self._grid.xy_of_link[:, 0][self._active_horizontal_links]
-        self._y_of_particle    = self._grid.xy_of_link[:, 1][self._active_horizontal_links]
+        self._x_of_particle = self._grid.xy_of_link[:, 0][self._active_horizontal_links]
+        self._y_of_particle = self._grid.xy_of_link[:, 1][self._active_horizontal_links]
         self._u_vel_of_particle = self._u_vel[self._horizontal_is_active]
         self._v_vel_of_particle = self._v_vel_at_u_links[self._horizontal_is_active]
-        self._x_at_exit_point  = self._x_of_particle.copy()
-        self._y_at_exit_point  = self._y_of_particle.copy()
+        self._x_at_exit_point = self._x_of_particle.copy()
+        self._y_at_exit_point = self._y_of_particle.copy()
 
         self.path_line_tracing()
 
@@ -1108,19 +1153,19 @@ class RiverFlowDynamics(Component):
         link_B2 = self.find_nearest_link(
             self._x_at_exit_point, self._y_at_exit_point, objective_links="horizontal"
         )
-        adj_B2  = self.find_adjacent_links_at_link(link_B2, objective_links="horizontal")
+        adj_B2 = self.find_adjacent_links_at_link(link_B2, objective_links="horizontal")
 
-        link_A2 = adj_B2[:, 1]   # North
-        link_C2 = adj_B2[:, 3]   # South
-        flip_v  = temp_v_at_h[link_B2] < 0
+        link_A2 = adj_B2[:, 1]  # North
+        link_C2 = adj_B2[:, 3]  # South
+        flip_v = temp_v_at_h[link_B2] < 0
         link_A2 = np.where(flip_v, adj_B2[:, 3], adj_B2[:, 1])
         link_C2 = np.where(flip_v, adj_B2[:, 1], adj_B2[:, 3])
         link_A2 = np.where(link_A2 >= 0, link_A2, link_B2)
         link_C2 = np.where(link_C2 >= 0, link_C2, link_B2)
 
-        flip_u  = self._vel_at_N[link_B2] < 0
-        adj_A2  = self.find_adjacent_links_at_link(link_A2, objective_links="horizontal")
-        adj_C2  = self.find_adjacent_links_at_link(link_C2, objective_links="horizontal")
+        flip_u = self._vel_at_N[link_B2] < 0
+        adj_A2 = self.find_adjacent_links_at_link(link_A2, objective_links="horizontal")
+        adj_C2 = self.find_adjacent_links_at_link(link_C2, objective_links="horizontal")
 
         link_A1 = np.where(flip_u, adj_A2[:, 2], adj_A2[:, 0])
         link_A3 = np.where(flip_u, adj_A2[:, 0], adj_A2[:, 2])
@@ -1132,11 +1177,14 @@ class RiverFlowDynamics(Component):
         def _sv(lnk, fall):
             return np.where(lnk >= 0, self._vel_at_N[lnk], self._vel_at_N[fall])
 
-        vel_A1 = _sv(link_A1, link_A2); vel_A2 = self._vel_at_N[link_A2]
+        vel_A1 = _sv(link_A1, link_A2)
+        vel_A2 = self._vel_at_N[link_A2]
         vel_A3 = _sv(link_A3, link_A2)
-        vel_B1 = _sv(link_B1, link_B2); vel_B2 = self._vel_at_N[link_B2]
+        vel_B1 = _sv(link_B1, link_B2)
+        vel_B2 = self._vel_at_N[link_B2]
         vel_B3 = _sv(link_B3, link_B2)
-        vel_C1 = _sv(link_C1, link_C2); vel_C2 = self._vel_at_N[link_C2]
+        vel_C1 = _sv(link_C1, link_C2)
+        vel_C2 = self._vel_at_N[link_C2]
         vel_C3 = _sv(link_C3, link_C2)
 
         x2 = self._grid.xy_of_link[link_B2][:, 0]
@@ -1172,12 +1220,12 @@ class RiverFlowDynamics(Component):
         dx, dy = self.grid.dx, self.grid.dy
 
         # Particle start positions at active vertical link centres
-        self._x_of_particle    = self._grid.xy_of_link[:, 0][self._active_vertical_links]
-        self._y_of_particle    = self._grid.xy_of_link[:, 1][self._active_vertical_links]
+        self._x_of_particle = self._grid.xy_of_link[:, 0][self._active_vertical_links]
+        self._y_of_particle = self._grid.xy_of_link[:, 1][self._active_vertical_links]
         self._v_vel_of_particle = self._v_vel[self._vertical_is_active]
         self._u_vel_of_particle = self._u_vel_at_v_links[self._vertical_is_active]
-        self._x_at_exit_point  = self._x_of_particle.copy()
-        self._y_at_exit_point  = self._y_of_particle.copy()
+        self._x_at_exit_point = self._x_of_particle.copy()
+        self._y_at_exit_point = self._y_of_particle.copy()
 
         self.path_line_tracing()
 
@@ -1189,17 +1237,17 @@ class RiverFlowDynamics(Component):
         link_B2 = self.find_nearest_link(
             self._x_at_exit_point, self._y_at_exit_point, objective_links="vertical"
         )
-        adj_B2  = self.find_adjacent_links_at_link(link_B2, objective_links="vertical")
+        adj_B2 = self.find_adjacent_links_at_link(link_B2, objective_links="vertical")
 
-        flip_v  = self._vel_at_N[link_B2] < 0
+        flip_v = self._vel_at_N[link_B2] < 0
         link_A2 = np.where(flip_v, adj_B2[:, 3], adj_B2[:, 1])
         link_C2 = np.where(flip_v, adj_B2[:, 1], adj_B2[:, 3])
         link_A2 = np.where(link_A2 >= 0, link_A2, link_B2)
         link_C2 = np.where(link_C2 >= 0, link_C2, link_B2)
 
-        flip_u  = temp_u_at_v[link_B2] < 0
-        adj_A2  = self.find_adjacent_links_at_link(link_A2, objective_links="vertical")
-        adj_C2  = self.find_adjacent_links_at_link(link_C2, objective_links="vertical")
+        flip_u = temp_u_at_v[link_B2] < 0
+        adj_A2 = self.find_adjacent_links_at_link(link_A2, objective_links="vertical")
+        adj_C2 = self.find_adjacent_links_at_link(link_C2, objective_links="vertical")
 
         link_A1 = np.where(flip_u, adj_A2[:, 2], adj_A2[:, 0])
         link_A3 = np.where(flip_u, adj_A2[:, 0], adj_A2[:, 2])
@@ -1211,11 +1259,14 @@ class RiverFlowDynamics(Component):
         def _sv(lnk, fall):
             return np.where(lnk >= 0, self._vel_at_N[lnk], self._vel_at_N[fall])
 
-        vel_A1 = _sv(link_A1, link_A2); vel_A2 = self._vel_at_N[link_A2]
+        vel_A1 = _sv(link_A1, link_A2)
+        vel_A2 = self._vel_at_N[link_A2]
         vel_A3 = _sv(link_A3, link_A2)
-        vel_B1 = _sv(link_B1, link_B2); vel_B2 = self._vel_at_N[link_B2]
+        vel_B1 = _sv(link_B1, link_B2)
+        vel_B2 = self._vel_at_N[link_B2]
         vel_B3 = _sv(link_B3, link_B2)
-        vel_C1 = _sv(link_C1, link_C2); vel_C2 = self._vel_at_N[link_C2]
+        vel_C1 = _sv(link_C1, link_C2)
+        vel_C2 = self._vel_at_N[link_C2]
         vel_C3 = _sv(link_C3, link_C2)
 
         x2 = self._grid.xy_of_link[link_B2][:, 0]
@@ -1254,22 +1305,21 @@ class RiverFlowDynamics(Component):
         """
         f_vel = np.zeros_like(self._vel_at_N)
         f_vel[self.grid.horizontal_links] = self._UsL + self._Uvis
-        f_vel[self.grid.vertical_links]   = self._VsL + self._Vvis
+        f_vel[self.grid.vertical_links] = self._VsL + self._Vvis
 
         # Pressure gradient using correct link-direction length
-        eta_grad_N = (
-            self._grid.calc_diff_at_link(self._eta_at_N) / self._link_lengths
-        )
+        eta_grad_N = self._grid.calc_diff_at_link(self._eta_at_N) / self._link_lengths
         self._g_links = (
             self._h_at_N_at_links * f_vel
             - self._h_at_N_at_links
-            * (1.0 - self._theta) * self._g * self._dt * eta_grad_N
+            * (1.0 - self._theta)
+            * self._g
+            * self._dt
+            * eta_grad_N
         )
 
         self._g_links = np.where(self._wet_links, self._g_links, 0.0)
-        self._g_links = np.where(
-            self._grid.status_at_link == 4, 0.0, self._g_links
-        )
+        self._g_links = np.where(self._grid.status_at_link == 4, 0.0, self._g_links)
 
     def _solve_pressure_correction(self, dx, dy):
         """Build and solve the sparse pressure-correction (WSE) linear system.
@@ -1284,11 +1334,11 @@ class RiverFlowDynamics(Component):
         pcg_info : int
             Scipy CG flag (0 = converged, >0 = max-iter reached, <0 = breakdown).
         """
-        core    = self.grid.core_nodes
-        n_core  = core.size
+        core = self.grid.core_nodes
+        n_core = core.size
 
-        adj_nodes = self._core_adjacent_nodes   # [N_core, 4]
-        adj_links = self._core_adjacent_links   # [N_core, 4]
+        adj_nodes = self._core_adjacent_nodes  # [N_core, 4]
+        adj_links = self._core_adjacent_links  # [N_core, 4]
 
         # ── RHS ──────────────────────────────────────────────────────────────
         tmp_flux = self._h_at_N_at_links[adj_links] * self._vel_at_N[adj_links]
@@ -1334,7 +1384,7 @@ class RiverFlowDynamics(Component):
                 rhs[is_bnd] -= cj[is_bnd] * self._eta_at_N[nbr[is_bnd]]
 
         # Assemble sparse COO matrix (core nodes only)
-        cols_all  = [core_index[adj_nodes[:, j]] for j in range(4)] + [row]
+        cols_all = [core_index[adj_nodes[:, j]] for j in range(4)] + [row]
         coefs_all = [cE, cN, cW, cS, cC]
 
         rows_coo, cols_coo, data_coo = [], [], []
@@ -1353,7 +1403,7 @@ class RiverFlowDynamics(Component):
         ).tocsr()
 
         # Jacobi preconditioner
-        diag     = LHS.diagonal()
+        diag = LHS.diagonal()
         inv_diag = np.where(diag != 0.0, 1.0 / diag, 1.0)
         M = sp.sparse.linalg.LinearOperator(
             (n_core, n_core),
@@ -1362,7 +1412,9 @@ class RiverFlowDynamics(Component):
         )
 
         pcg_solution, pcg_info = sp.sparse.linalg.cg(
-            LHS, rhs, M=M,
+            LHS,
+            rhs,
+            M=M,
             rtol=self._pcg_tolerance,
             maxiter=self._pcg_max_iterations,
             atol=0.0,
@@ -1417,9 +1469,7 @@ class RiverFlowDynamics(Component):
 
         # Fixed-stage outlet BC (ramp-up: only activate when h >= outlet_max_depth)
         if self._fixed_exit_nodes_exist:
-            eta_target = (
-                self._exit_nodes_h_values - self._z[self._fixed_exit_nodes]
-            )
+            eta_target = self._exit_nodes_h_values - self._z[self._fixed_exit_nodes]
             if self._outlet_max_depth is not None:
                 # Use self._h for the depth check — eta at boundary nodes has
                 # been zeroed by the pressure-solve reset before this call.
@@ -1442,14 +1492,12 @@ class RiverFlowDynamics(Component):
         # These nodes act as impermeable walls; their eta is set last so it
         # cannot be overwritten by the open-BC branch above.
         if self._closed_nodes_exist:
-            self._eta[self._closed_boundary_nodes] = (
-                -self._z[self._closed_boundary_nodes]
-            )
+            self._eta[self._closed_boundary_nodes] = -self._z[
+                self._closed_boundary_nodes
+            ]
 
         # Clip WSE below topographic surface
-        self._eta = np.where(
-            np.abs(self._eta) > np.abs(self._z), -self._z, self._eta
-        )
+        self._eta = np.where(np.abs(self._eta) > np.abs(self._z), -self._z, self._eta)
 
         self._eta_at_links = self._grid.map_mean_of_link_nodes_to_link(self._eta)
 
@@ -1463,19 +1511,23 @@ class RiverFlowDynamics(Component):
         wet_head = np.where(
             np.abs(self._eta[self._grid.node_at_link_head])
             <= np.abs(self._z[self._grid.node_at_link_head] - self._threshold_depth),
-            1, 0,
+            1,
+            0,
         )
         bed_above = np.where(
             np.abs(self._z[self._grid.node_at_link_head])
             > np.abs(self._eta[self._grid.node_at_link_tail]),
-            1, 0,
+            1,
+            0,
         )
         apply_mask = np.where((wet_head + bed_above) > 1, 1, 0)
 
         # Pressure gradient using direction-correct link lengths
         eta_grad = self._grid.calc_diff_at_link(self._eta) / self._link_lengths
         pressure_term = (
-            self._theta * self._g * self._dt
+            self._theta
+            * self._g
+            * self._dt
             * eta_grad
             * self._h_at_N_at_links
             / self._a_links
@@ -1512,10 +1564,10 @@ class RiverFlowDynamics(Component):
         open_bnd_active_links = self.grid.active_links[is_open_bnd]
 
         # Find the upstream link for each open boundary link
-        tiled_bnd   = np.tile(open_bnd_active_links, (4, 1)).T
+        tiled_bnd = np.tile(open_bnd_active_links, (4, 1)).T
         surrounding = self._grid.links_at_node[nodes_1_back]
-        pos_arr     = np.tile([0, 1, 2, 3], (len(self._open_boundary_nodes), 1))
-        pos         = pos_arr[tiled_bnd == surrounding]
+        pos_arr = np.tile([0, 1, 2, 3], (len(self._open_boundary_nodes), 1))
+        pos = pos_arr[tiled_bnd == surrounding]
 
         # Reverse direction: find the link pointing back inward
         rev = np.where(pos == 0, 2, pos)
@@ -1546,9 +1598,7 @@ class RiverFlowDynamics(Component):
         h_tail = (
             self._z_at_links + self._eta[self._grid.node_at_link_tail]
         ) * is_wet_node[self._grid.node_at_link_tail]
-        self._h_at_links = np.maximum.reduce(
-            [h_head, h_tail, np.zeros_like(h_head)]
-        )
+        self._h_at_links = np.maximum.reduce([h_head, h_tail, np.zeros_like(h_head)])
 
         # Override at open boundary links
         self._h_at_links[self._open_boundary_links] = (
@@ -1561,12 +1611,12 @@ class RiverFlowDynamics(Component):
             self._h_at_links < self._threshold_depth, 0.0, self._h_at_links
         )
         self._wet_links = self._h_at_links >= self._threshold_depth
-        self._vel      *= self._wet_links
+        self._vel *= self._wet_links
 
         # Node depth: average of qualifying wet surrounding link depths
-        surrounding     = self._grid.links_at_node[self.grid.core_nodes]
-        surr_wet        = self._wet_links[surrounding]
-        wse_above_bed   = (
+        surrounding = self._grid.links_at_node[self.grid.core_nodes]
+        surr_wet = self._wet_links[surrounding]
+        wse_above_bed = (
             np.abs(self._eta_at_links[surrounding])
             < np.abs(self._z[self.grid.core_nodes] - self._threshold_depth)[:, None]
         )
@@ -1574,9 +1624,8 @@ class RiverFlowDynamics(Component):
         n_qual = np.where(n_qual == 0, -9999, n_qual)
         self._h[self.grid.core_nodes] = np.where(
             n_qual > 0,
-            np.sum(
-                self._h_at_links[surrounding] * surr_wet * wse_above_bed, axis=1
-            ) / n_qual,
+            np.sum(self._h_at_links[surrounding] * surr_wet * wse_above_bed, axis=1)
+            / n_qual,
             0.0,
         )
 
@@ -1584,14 +1633,12 @@ class RiverFlowDynamics(Component):
         if self._fixed_nodes_exist:
             self._h[self._fixed_entry_nodes] = self._entry_nodes_h_values
         self._h[self._open_boundary_nodes] = (
-            self._eta[self._open_boundary_nodes]
-            + self._z[self._open_boundary_nodes]
+            self._eta[self._open_boundary_nodes] + self._z[self._open_boundary_nodes]
         )
         # Fixed-stage outlet: derive h from the (possibly ramp-clamped) eta
         if self._fixed_exit_nodes_exist:
             self._h[self._fixed_exit_nodes] = (
-                self._eta[self._fixed_exit_nodes]
-                + self._z[self._fixed_exit_nodes]
+                self._eta[self._fixed_exit_nodes] + self._z[self._fixed_exit_nodes]
             )
         # Closed boundary nodes: enforce h = 0 (dry wall)
         if self._closed_nodes_exist:
@@ -1609,14 +1656,14 @@ class RiverFlowDynamics(Component):
         Uses in-place [:] assignment to update existing arrays without
         triggering reallocation on every step.
         """
-        self._grid.at_node["surface_water__depth"][:]     = self._h
-        self._grid.at_link["surface_water__velocity"][:]  = self._vel
-        self._grid.at_node["surface_water__elevation"][:] = (
-            self._eta + (self._max_elevation + self._additional_z)
+        self._grid.at_node["surface_water__depth"][:] = self._h
+        self._grid.at_link["surface_water__velocity"][:] = self._vel
+        self._grid.at_node["surface_water__elevation"][:] = self._eta + (
+            self._max_elevation + self._additional_z
         )
         self._grid.at_link["surface_water__velocity_at_N-1"][:] = self._vel_at_N
-        self._grid.at_node["surface_water__elevation_at_N-1"][:] = (
-            self._eta_at_N + (self._max_elevation + self._additional_z)
+        self._grid.at_node["surface_water__elevation_at_N-1"][:] = self._eta_at_N + (
+            self._max_elevation + self._additional_z
         )
 
         # Project link-scalar velocity onto node-centred x/y components.
@@ -1640,14 +1687,14 @@ class RiverFlowDynamics(Component):
         Oldest level is updated first so each variable retains its correct
         time-lagged state (bug fix: original code overwrote N before copying to N-1).
         """
-        self._eta_at_N_1      = self._eta_at_N.copy()   # N   -> N-1
-        self._eta_at_N        = self._eta.copy()          # cur -> N
+        self._eta_at_N_1 = self._eta_at_N.copy()  # N   -> N-1
+        self._eta_at_N = self._eta.copy()  # cur -> N
 
-        self._h_at_N          = self._h.copy()
+        self._h_at_N = self._h.copy()
         self._h_at_N_at_links = self._h_at_links.copy()
 
-        self._vel_at_N_1      = self._vel_at_N.copy()   # N   -> N-1
-        self._vel_at_N        = self._vel.copy()          # cur -> N
+        self._vel_at_N_1 = self._vel_at_N.copy()  # N   -> N-1
+        self._vel_at_N = self._vel.copy()  # cur -> N
 
     def _find_upstream_nodes(self):
         """Return the one-cell-upstream interior nodes of each open boundary node.

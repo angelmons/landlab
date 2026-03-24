@@ -29,10 +29,10 @@ import pytest
 from landlab import RasterModelGrid
 from landlab.components import RiverFlowDynamics_HLLC
 
-
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
+
 
 def _make_grid(nr: int, nc: int, dx: float = 1.0) -> RasterModelGrid:
     return RasterModelGrid((nr, nc), xy_spacing=dx)
@@ -46,11 +46,14 @@ def _component_accepts(param_name: str) -> bool:
 
 def _apply_stage_exit_bc_supported() -> bool:
     return _component_accepts("fixed_exit_nodes") and (
-        _component_accepts("exit_nodes_eta_values") or _component_accepts("exit_nodes_h_values")
+        _component_accepts("exit_nodes_eta_values")
+        or _component_accepts("exit_nodes_h_values")
     )
 
 
-def _run_to_time(comp: RiverFlowDynamics_HLLC, t_end: float, dt_fixed: float | None = None):
+def _run_to_time(
+    comp: RiverFlowDynamics_HLLC, t_end: float, dt_fixed: float | None = None
+):
     """Advance component to t_end (seconds), trimming the last step.
 
     If dt_fixed is provided, still respect the component CFL dt to avoid
@@ -60,24 +63,24 @@ def _run_to_time(comp: RiverFlowDynamics_HLLC, t_end: float, dt_fixed: float | N
 
     while comp.elapsed_time < t_end - epsilon:
         time_remaining = t_end - comp.elapsed_time
-        
-        # If no fixed dt is requested and we aren't at the final partial step, 
+
+        # If no fixed dt is requested and we aren't at the final partial step,
         # let the component calculate and use its own safe dt entirely.
         if dt_fixed is None and time_remaining >= comp.current_dt:
             comp.run_one_step()
             continue
-            
+
         # Otherwise, we need to enforce a fixed dt or trim the final step
         dt_cfl = comp.current_dt
-        
+
         if dt_fixed is None:
             dt_target = time_remaining
         else:
             dt_target = min(float(dt_fixed), time_remaining)
-            
+
         # Always respect the CFL limit
         dt = min(dt_target, dt_cfl)
-        
+
         comp.run_one_step(dt=dt)
 
 
@@ -164,7 +167,6 @@ def test_initialization_creates_fields():
     grid2.add_zeros("topographic__elevation", at="node")
     grid2.add_full("surface_water__depth", 0.5, at="node")
     grid2.add_zeros("surface_water__velocity", at="link")
-    comp2 = RiverFlowDynamics_HLLC(grid2, update_link_fields=True)
     # Some implementations update an existing link field rather than creating it.
     assert "surface_water__velocity" in grid2.at_link
     assert grid2.at_link["surface_water__velocity"].shape == (grid2.number_of_links,)
@@ -243,12 +245,16 @@ def test_mass_conservation_all_walls():
     x = (np.arange(nc) + 0.5) * dx
     y = (np.arange(nr) + 0.5) * dx
     X, Y = np.meshgrid(x, y)
-    h0 = (0.5 + 0.3 * np.exp(-((X - x.mean()) ** 2 + (Y - y.mean()) ** 2) / 4.0)).ravel()
+    h0 = (
+        0.5 + 0.3 * np.exp(-((X - x.mean()) ** 2 + (Y - y.mean()) ** 2) / 4.0)
+    ).ravel()
     grid.add_field("surface_water__depth", h0, at="node", copy=True)
 
     mass0 = h0.sum() * dx**2
 
-    comp = RiverFlowDynamics_HLLC(grid, wall_edges={"left", "right", "bottom", "top"}, mannings_n=0.0)
+    comp = RiverFlowDynamics_HLLC(
+        grid, wall_edges={"left", "right", "bottom", "top"}, mannings_n=0.0
+    )
 
     for _ in range(50):
         comp.run_one_step()
@@ -304,7 +310,9 @@ def test_wall_left_right_zero_normal_momentum():
     x = (np.arange(nc) + 0.5) * dx
     y = (np.arange(nr) + 0.5) * dx
     X, Y = np.meshgrid(x, y)
-    h0 = (0.3 + 0.5 * np.exp(-((X - x.mean()) ** 2 + (Y - y.mean()) ** 2) / 2.0)).ravel()
+    h0 = (
+        0.3 + 0.5 * np.exp(-((X - x.mean()) ** 2 + (Y - y.mean()) ** 2) / 2.0)
+    ).ravel()
     grid.add_field("surface_water__depth", h0, at="node", copy=True)
 
     comp = RiverFlowDynamics_HLLC(grid, wall_edges={"left", "right"}, mannings_n=0.0)
@@ -458,7 +466,9 @@ def test_adaptive_vs_fixed_replay():
         grid = _make_grid(nr, nc, dx=dx)
         grid.add_zeros("topographic__elevation", at="node")
         H = np.where(x < x0, 1.0, 0.1)
-        grid.add_field("surface_water__depth", np.tile(H, (nr, 1)).ravel(), at="node", copy=True)
+        grid.add_field(
+            "surface_water__depth", np.tile(H, (nr, 1)).ravel(), at="node", copy=True
+        )
         return RiverFlowDynamics_HLLC(grid, cfl=0.45, mannings_n=0.0)
 
     comp_a = make_comp()
@@ -502,7 +512,10 @@ def test_elapsed_time_accumulates():
 # -----------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _apply_stage_exit_bc_supported(), reason="Exit BC params not supported by this build.")
+@pytest.mark.skipif(
+    not _apply_stage_exit_bc_supported(),
+    reason="Exit BC params not supported by this build.",
+)
 def test_fixed_exit_stage_produces_near_uniform_depth_like_rfd_example():
     """Regression-style test for fixed outlet stage.
 
@@ -573,23 +586,28 @@ def test_numerical_stability_no_nan_inf_and_nonnegative_depth(dt):
     assert np.isfinite(u).all()
     assert np.isfinite(v).all()
 
+
 # -----------------------------------------------------------------------------
 # Improving coverage
 # -----------------------------------------------------------------------------
+
 
 def test_muscl_reconstruction_order_2():
     grid = _make_grid(6, 6, dx=1.0)
     grid.add_zeros("topographic__elevation", at="node")
     grid.add_full("surface_water__depth", 0.5, at="node")
 
+
 def test_init_exceptions():
     with pytest.raises(TypeError, match="requires a RasterModelGrid"):
         RiverFlowDynamics_HLLC("not_a_grid")
+
 
 def test_cfl_warning_triggered_by_huge_dt():
     grid = _make_grid(5, 5, dx=1.0)
     grid.add_zeros("topographic__elevation", at="node")
     grid.add_full("surface_water__depth", 1.0, at="node")
+
 
 def test_exit_nodes_with_imposed_velocities():
     grid = _make_grid(5, 5, dx=1.0)

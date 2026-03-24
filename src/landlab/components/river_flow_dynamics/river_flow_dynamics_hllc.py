@@ -1,4 +1,4 @@
-""" Simulate surface fluid flow with an HLLC shallow-water solver.
+"""Simulate surface fluid flow with an HLLC shallow-water solver.
 
 This component implements a finite-volume Godunov-type approximation of the
 depth-averaged 2D shallow-water equations on a RasterModelGrid. Numerical fluxes
@@ -11,7 +11,9 @@ Written by Angel Monsalve.
 
 References
 ----------
-Monsalve et al., (2025). RiverFlowDynamics v1.0: A Landlab component for computing two-dimensional river flow dynamics. Journal of Open Source Software, 10(110), 7823, https://doi.org/10.21105/joss.07823
+Monsalve et al., (2025). RiverFlowDynamics v1.0: A Landlab component for
+computing two-dimensional river flow dynamics. Journal of Open Source Software,
+10(110), 7823, https://doi.org/10.21105/joss.07823
 
 Toro, E. F. (2001). *Shock-Capturing Methods for Free-Surface Shallow Flows*.
 
@@ -44,7 +46,7 @@ simple sloped channel with a fixed inflow (left) and a fixed-depth outlet
 >>> from landlab.components import RiverFlowDynamics_HLLC
 
 Create a small grid for demonstration purposes:
-    
+
 >>> grid = RasterModelGrid((8, 6), xy_spacing=0.1)
 
 Set up a sloped channel with elevated sides (slope of 0.01):
@@ -101,6 +103,7 @@ Run the simulation for 10 seconds:
 >>> dt = 0.01
 >>> while rfd.elapsed_time < target_time:
 ...     rfd.run_one_step(dt=min(dt, target_time - rfd.elapsed_time))
+...
 
 >>> bool(np.all(grid.at_node["surface_water__depth"] >= 0.0))
 True
@@ -112,7 +115,7 @@ True
 Examine the flow depth at the center of the channel after 10 seconds.
 Expected values are from RiverBedDynamics
 
->>> expected = np.array([0.5  , 0.5  , 0.5  , 0.501, 0.502, 0.502])
+>>> expected = np.array([0.5, 0.5, 0.5, 0.501, 0.502, 0.502])
 >>> flow_depth = np.reshape(grid.at_node["surface_water__depth"], (8, 6))[3, :]
 >>> bool(np.allclose(np.round(flow_depth, 3), expected, atol=0.02))
 True
@@ -120,7 +123,7 @@ True
 And the velocity at links along the center of the channel.
 Expected values are from RiverBedDynamics
 
->>> expected = np.array([0.45 , 0.457, 0.455, 0.452, 0.453])
+>>> expected = np.array([0.45, 0.457, 0.455, 0.452, 0.453])
 >>> linksAtCenter = grid.links_at_node[np.array(np.arange(24, 30))][:-1, 0]
 >>> flow_velocity = grid["link"]["surface_water__velocity"][linksAtCenter]
 >>> bool(np.allclose(np.round(flow_velocity, 3), expected, atol=0.02))
@@ -129,19 +132,23 @@ True
 """
 
 import warnings
+
 import numpy as np
-from landlab import Component, RasterModelGrid
+
+from landlab import Component
+from landlab import RasterModelGrid
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
 # ─────────────────────────────────────────────────────────────────────────────
-_G     = 9.80665   # gravitational acceleration [m/s²]
-_H_DRY = 1e-4      # depth threshold for wet/dry distinction [m]
+_G = 9.80665  # gravitational acceleration [m/s²]
+_H_DRY = 1e-4  # depth threshold for wet/dry distinction [m]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HLLC Riemann kernel
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _swe_flux_x(h, hu, hv, g):
     inv_h = np.where(h > 0.0, 1.0 / np.where(h > 0.0, h, 1.0), 0.0)
@@ -160,22 +167,20 @@ def _wave_speeds(hL, uL, hR, uR, g):
     c_roe = np.sqrt(g * 0.5 * (np.maximum(hL, 0.0) + np.maximum(hR, 0.0)))
     SL = np.minimum(uL - cL, u_roe - c_roe)
     SR = np.maximum(uR + cR, u_roe + c_roe)
-    num  = hR * uR * (uR - SR) - hL * uL * (uL - SL) + 0.5 * g * (hR**2 - hL**2)
+    num = hR * uR * (uR - SR) - hL * uL * (uL - SL) + 0.5 * g * (hR**2 - hL**2)
     dstar = hR * (uR - SR) - hL * (uL - SL)
-    sf   = np.abs(dstar) > 1e-14
+    sf = np.abs(dstar) > 1e-14
     S_star = np.where(sf, num / np.where(sf, dstar, 1.0), 0.5 * (uL + uR))
     return SL, SR, S_star
 
 
 def _hllc_star_flux(h, hu, hv, Fh, Fhu, Fhv, S, S_star, g):
     inv_h = np.where(h > 0.0, 1.0 / np.where(h > 0.0, h, 1.0), 0.0)
-    v     = hv * inv_h
-    dss   = S - S_star
-    sf    = np.abs(dss) > 1e-14
-    c     = h * (S - hu * inv_h) / np.where(sf, dss, np.sign(dss + 1e-30) * 1e-14)
-    return (Fh  + S * (c         - h ),
-            Fhu + S * (c * S_star - hu),
-            Fhv + S * (c * v      - hv))
+    v = hv * inv_h
+    dss = S - S_star
+    sf = np.abs(dss) > 1e-14
+    c = h * (S - hu * inv_h) / np.where(sf, dss, np.sign(dss + 1e-30) * 1e-14)
+    return (Fh + S * (c - h), Fhu + S * (c * S_star - hu), Fhv + S * (c * v - hv))
 
 
 def _hllc_flux_x(hL, huL, hvL, hR, huR, hvR, g=_G):
@@ -190,8 +195,13 @@ def _hllc_flux_x(hL, huL, hvL, hR, huR, hvR, g=_G):
     SL, SR, SS = _wave_speeds(hL, uL, hR, uR, g)
     FLh, FLhu, FLhv = _hllc_star_flux(hL, huL, hvL, FhL, FhuL, FhvL, SL, SS, g)
     FRh, FRhu, FRhv = _hllc_star_flux(hR, huR, hvR, FhR, FhuR, FhvR, SR, SS, g)
-    uL = SL >= 0.0;  uLs = (~uL) & (SS >= 0.0);  uRs = (~uL) & (~uLs) & (SR >= 0.0)
-    w = lambda a, b, c, d: np.where(uL, a, np.where(uLs, b, np.where(uRs, c, d)))
+    uL = SL >= 0.0
+    uLs = (~uL) & (SS >= 0.0)
+    uRs = (~uL) & (~uLs) & (SR >= 0.0)
+
+    def w(a, b, c, d):
+        return np.where(uL, a, np.where(uLs, b, np.where(uRs, c, d)))
+
     return w(FhL, FLh, FRh, FhR), w(FhuL, FLhu, FRhu, FhuR), w(FhvL, FLhv, FRhv, FhvR)
 
 
@@ -199,8 +209,10 @@ def _hllc_flux_x(hL, huL, hvL, hR, huR, hvR, g=_G):
 # MUSCL + Audusse reconstruction
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _vanleer(a, b):
-    ab = a * b;  s = a + b
+    ab = a * b
+    s = a + b
     return np.where(ab > 0.0, 2.0 * ab / np.where(np.abs(s) > 1e-14, s, 1.0), 0.0)
 
 
@@ -220,99 +232,133 @@ def _hydro_recon(etaL, etaR, zL, zR):
 # Directional sweeps with configurable BCs
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _pad(q, left_reflect=False, right_reflect=False, negate=False):
-    #Pad q with transmissive or reflective ghost cells in x.
+    # Pad q with transmissive or reflective ghost cells in x.
     sign = -1.0 if negate else 1.0
-    left_ghost  = q[:, :1]  * (sign if left_reflect  else 1.0)
+    left_ghost = q[:, :1] * (sign if left_reflect else 1.0)
     right_ghost = q[:, -1:] * (sign if right_reflect else 1.0)
     return np.concatenate([left_ghost, q, right_ghost], axis=1)
 
 
-def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1,
-             left_wall=False, right_wall=False):
+def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1, left_wall=False, right_wall=False):
     nr, nc = h.shape
     eta = h + z
 
     # transmissive by default; reflective (negated u-mom) for walls
     eta_p = _pad(eta, left_wall, right_wall, negate=False)
-    z_p   = _pad(z,   left_wall, right_wall, negate=False)
-    hu_p  = _pad(hu,  left_wall, right_wall, negate=True)   # negate normal momentum
-    hv_p  = _pad(hv,  left_wall, right_wall, negate=False)
+    z_p = _pad(z, left_wall, right_wall, negate=False)
+    hu_p = _pad(hu, left_wall, right_wall, negate=True)  # negate normal momentum
+    hv_p = _pad(hv, left_wall, right_wall, negate=False)
 
     if order == 2:
-        etaL, etaR = _muscl_x(eta_p);  zL, zR = _muscl_x(z_p)
-        huL, huR   = _muscl_x(hu_p);   hvL, hvR = _muscl_x(hv_p)
+        etaL, etaR = _muscl_x(eta_p)
+        zL, zR = _muscl_x(z_p)
+        huL, huR = _muscl_x(hu_p)
+        hvL, hvR = _muscl_x(hv_p)
     else:
         etaL, etaR = eta_p[:, :-1], eta_p[:, 1:]
-        zL,   zR   =   z_p[:, :-1],   z_p[:, 1:]
-        huL,  huR  =  hu_p[:, :-1],  hu_p[:, 1:]
-        hvL,  hvR  =  hv_p[:, :-1],  hv_p[:, 1:]
+        zL, zR = z_p[:, :-1], z_p[:, 1:]
+        huL, huR = hu_p[:, :-1], hu_p[:, 1:]
+        hvL, hvR = hv_p[:, :-1], hv_p[:, 1:]
 
     hL_s, hR_s, _ = _hydro_recon(etaL, etaR, zL, zR)
-    hLr = np.maximum(0.0, etaL - zL);  hRr = np.maximum(0.0, etaR - zR)
-    iL  = np.where(hLr > _H_DRY, 1.0 / np.where(hLr > _H_DRY, hLr, 1.0), 0.0)
-    iR  = np.where(hRr > _H_DRY, 1.0 / np.where(hRr > _H_DRY, hRr, 1.0), 0.0)
+    hLr = np.maximum(0.0, etaL - zL)
+    hRr = np.maximum(0.0, etaR - zR)
+    iL = np.where(hLr > _H_DRY, 1.0 / np.where(hLr > _H_DRY, hLr, 1.0), 0.0)
+    iR = np.where(hRr > _H_DRY, 1.0 / np.where(hRr > _H_DRY, hRr, 1.0), 0.0)
     uL, vL = huL * iL, hvL * iL
     uR, vR = huR * iR, hvR * iR
 
     Fh, Fhu, Fhv = _hllc_flux_x(
-        hL_s.ravel(), (hL_s * uL).ravel(), (hL_s * vL).ravel(),
-        hR_s.ravel(), (hR_s * uR).ravel(), (hR_s * vR).ravel(), g=g)
-    Fh  = Fh.reshape(nr, nc + 1)
+        hL_s.ravel(),
+        (hL_s * uL).ravel(),
+        (hL_s * vL).ravel(),
+        hR_s.ravel(),
+        (hR_s * uR).ravel(),
+        (hR_s * vR).ravel(),
+        g=g,
+    )
+    Fh = Fh.reshape(nr, nc + 1)
     Fhu = Fhu.reshape(nr, nc + 1)
     Fhv = Fhv.reshape(nr, nc + 1)
 
-    Sx = 0.5 * g * (hL_s[:, 1:]**2 - hR_s[:, :-1]**2) / dx
-    return (h  - dt / dx * (Fh[:,  1:] - Fh[:,  :-1]),
-            hu - dt / dx * (Fhu[:, 1:] - Fhu[:, :-1]) + dt * Sx,
-            hv - dt / dx * (Fhv[:, 1:] - Fhv[:, :-1]))
+    Sx = 0.5 * g * (hL_s[:, 1:] ** 2 - hR_s[:, :-1] ** 2) / dx
+    return (
+        h - dt / dx * (Fh[:, 1:] - Fh[:, :-1]),
+        hu - dt / dx * (Fhu[:, 1:] - Fhu[:, :-1]) + dt * Sx,
+        hv - dt / dx * (Fhv[:, 1:] - Fhv[:, :-1]),
+    )
 
 
-def _y_sweep(h, hu, hv, z, dt, dy, g=_G, order=1,
-             bottom_wall=False, top_wall=False):
+def _y_sweep(h, hu, hv, z, dt, dy, g=_G, order=1, bottom_wall=False, top_wall=False):
     h_T, hv_T, hu_T = _x_sweep(
-        h.T, hv.T, hu.T, z.T, dt, dy, g, order,
-        left_wall=bottom_wall, right_wall=top_wall)
+        h.T,
+        hv.T,
+        hu.T,
+        z.T,
+        dt,
+        dy,
+        g,
+        order,
+        left_wall=bottom_wall,
+        right_wall=top_wall,
+    )
     return h_T.T, hu_T.T, hv_T.T
 
 
 def _friction(h, hu, hv, dt, n_2d, g=_G):
-    wet  = h > _H_DRY
-    ih   = np.where(wet, 1.0 / np.where(wet, h, 1.0), 0.0)
-    spd  = np.sqrt((hu * ih)**2 + (hv * ih)**2)
-    Cf   = np.where(wet, g * n_2d**2 * spd / (h**(4.0 / 3.0) + 1e-30), 0.0)
-    fac  = 1.0 / (1.0 + Cf * dt)
+    wet = h > _H_DRY
+    ih = np.where(wet, 1.0 / np.where(wet, h, 1.0), 0.0)
+    spd = np.sqrt((hu * ih) ** 2 + (hv * ih) ** 2)
+    Cf = np.where(wet, g * n_2d**2 * spd / (h ** (4.0 / 3.0) + 1e-30), 0.0)
+    fac = 1.0 / (1.0 + Cf * dt)
     return h, hu * fac, hv * fac
 
 
 def _pos(h, hu, hv):
-    h  = np.maximum(h, 0.0)
+    h = np.maximum(h, 0.0)
     hu = np.where(h > _H_DRY, hu, 0.0)
     hv = np.where(h > _H_DRY, hv, 0.0)
     return h, hu, hv
 
 
 def _dt(h, hu, hv, dx, dy, cfl=0.45, g=_G):
-    wet  = h > _H_DRY
-    ih   = np.where(wet, 1.0 / np.where(wet, h, 1.0), 0.0)
-    c    = np.sqrt(g * np.maximum(h, 0.0))
-    mx   = (np.abs(hu * ih) + c).max() if wet.any() else 0.0
-    my   = (np.abs(hv * ih) + c).max() if wet.any() else 0.0
+    wet = h > _H_DRY
+    ih = np.where(wet, 1.0 / np.where(wet, h, 1.0), 0.0)
+    c = np.sqrt(g * np.maximum(h, 0.0))
+    mx = (np.abs(hu * ih) + c).max() if wet.any() else 0.0
+    my = (np.abs(hv * ih) + c).max() if wet.any() else 0.0
     return min(cfl * dx / (mx + 1e-12), cfl * dy / (my + 1e-12))
 
 
-def _step(h, hu, hv, z, dx, dy, dt, n_2d=0.0, g=_G, step_count=0, order=1,
-          left_wall=False, right_wall=False, bottom_wall=False, top_wall=False):
-    kx = dict(g=g, order=order, left_wall=left_wall,   right_wall=right_wall)
-    ky = dict(g=g, order=order, bottom_wall=bottom_wall, top_wall=top_wall)
-    P  = _pos
+def _step(
+    h,
+    hu,
+    hv,
+    z,
+    dx,
+    dy,
+    dt,
+    n_2d=0.0,
+    g=_G,
+    step_count=0,
+    order=1,
+    left_wall=False,
+    right_wall=False,
+    bottom_wall=False,
+    top_wall=False,
+):
+    kx = {"g": g, "order": order, "left_wall": left_wall, "right_wall": right_wall}
+    ky = {"g": g, "order": order, "bottom_wall": bottom_wall, "top_wall": top_wall}
+    P = _pos
     if step_count % 2 == 0:
         h, hu, hv = P(*_x_sweep(h, hu, hv, z, dt / 2, dx, **kx))
-        h, hu, hv = P(*_y_sweep(h, hu, hv, z, dt,     dy, **ky))
+        h, hu, hv = P(*_y_sweep(h, hu, hv, z, dt, dy, **ky))
         h, hu, hv = P(*_x_sweep(h, hu, hv, z, dt / 2, dx, **kx))
     else:
         h, hu, hv = P(*_y_sweep(h, hu, hv, z, dt / 2, dy, **ky))
-        h, hu, hv = P(*_x_sweep(h, hu, hv, z, dt,     dx, **kx))
+        h, hu, hv = P(*_x_sweep(h, hu, hv, z, dt, dx, **kx))
         h, hu, hv = P(*_y_sweep(h, hu, hv, z, dt / 2, dy, **ky))
     if np.any(n_2d > 0):
         h, hu, hv = P(*_friction(h, hu, hv, dt, n_2d, g))
@@ -322,6 +368,7 @@ def _step(h, hu, hv, z, dx, dy, dt, n_2d=0.0, g=_G, step_count=0, order=1,
 # ─────────────────────────────────────────────────────────────────────────────
 # Landlab Component
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class RiverFlowDynamics_HLLC(Component):
     """2D shallow-water HLLC solver on a RasterModelGrid.
@@ -432,8 +479,11 @@ class RiverFlowDynamics_HLLC(Component):
 
     _info = {
         "topographic__elevation": {
-            "dtype": float, "intent": "in", "optional": False,
-            "units": "m", "mapping": "node",
+            "dtype": float,
+            "intent": "in",
+            "optional": False,
+            "units": "m",
+            "mapping": "node",
             "doc": "Land surface topographic elevation",
         },
         "surface_water__depth": {
@@ -453,33 +503,51 @@ class RiverFlowDynamics_HLLC(Component):
             "doc": "Water surface elevation at time N",
         },
         "surface_water__x_velocity": {
-            "dtype": float, "intent": "out", "optional": False,
-            "units": "m/s", "mapping": "node",
+            "dtype": float,
+            "intent": "out",
+            "optional": False,
+            "units": "m/s",
+            "mapping": "node",
             "doc": "Depth-averaged x-velocity",
         },
         "surface_water__y_velocity": {
-            "dtype": float, "intent": "out", "optional": False,
-            "units": "m/s", "mapping": "node",
+            "dtype": float,
+            "intent": "out",
+            "optional": False,
+            "units": "m/s",
+            "mapping": "node",
             "doc": "Depth-averaged y-velocity",
         },
         "surface_water__x_momentum": {
-            "dtype": float, "intent": "out", "optional": False,
-            "units": "m2/s", "mapping": "node",
+            "dtype": float,
+            "intent": "out",
+            "optional": False,
+            "units": "m2/s",
+            "mapping": "node",
             "doc": "Depth-integrated x-momentum (hu)",
         },
         "surface_water__y_momentum": {
-            "dtype": float, "intent": "out", "optional": False,
-            "units": "m2/s", "mapping": "node",
+            "dtype": float,
+            "intent": "out",
+            "optional": False,
+            "units": "m2/s",
+            "mapping": "node",
             "doc": "Depth-integrated y-momentum (hv)",
         },
         "surface_water__velocity": {
-            "dtype": float, "intent": "out", "optional": True,
-            "units": "m/s", "mapping": "link",
+            "dtype": float,
+            "intent": "out",
+            "optional": True,
+            "units": "m/s",
+            "mapping": "link",
             "doc": "Speed of water flow above the surface",
         },
         "mannings_n_at_node": {
-            "dtype": float, "intent": "in", "optional": True,
-            "units": "s/m^(1/3)", "mapping": "node",
+            "dtype": float,
+            "intent": "in",
+            "optional": True,
+            "units": "s/m^(1/3)",
+            "mapping": "node",
             "doc": "Per-node Manning roughness coefficient",
         },
     }
@@ -508,16 +576,18 @@ class RiverFlowDynamics_HLLC(Component):
             raise TypeError("RiverFlowDynamics_HLLC requires a RasterModelGrid.")
         super().__init__(grid)
 
-        self._g      = float(g)
-        self._cfl    = float(cfl)
-        self._order  = int(order)
+        self._g = float(g)
+        self._cfl = float(cfl)
+        self._order = int(order)
         self._step_n = 0
-        self._t      = 0.0
+        self._t = 0.0
         self._update_links = bool(update_link_fields)
 
         nr, nc = grid.shape
-        self._nr = nr;  self._nc = nc
-        self._dx = grid.dx;  self._dy = grid.dy
+        self._nr = nr
+        self._nc = nc
+        self._dx = grid.dx
+        self._dy = grid.dy
 
         # ── Topography ────────────────────────────────────────────────────
         if "topographic__elevation" not in grid.at_node:
@@ -542,13 +612,13 @@ class RiverFlowDynamics_HLLC(Component):
             grid.add_zeros("surface_water__velocity", at="link")
 
         # ── 2-D views into flat node arrays (no copy) ─────────────────────
-        self._z   = grid.at_node["topographic__elevation"].reshape(nr, nc)
-        self._h   = grid.at_node["surface_water__depth"].reshape(nr, nc)
+        self._z = grid.at_node["topographic__elevation"].reshape(nr, nc)
+        self._h = grid.at_node["surface_water__depth"].reshape(nr, nc)
         self._eta = grid.at_node["surface_water__elevation"].reshape(nr, nc)
-        self._u   = grid.at_node["surface_water__x_velocity"].reshape(nr, nc)
-        self._v   = grid.at_node["surface_water__y_velocity"].reshape(nr, nc)
-        self._hu  = grid.at_node["surface_water__x_momentum"].reshape(nr, nc)
-        self._hv  = grid.at_node["surface_water__y_momentum"].reshape(nr, nc)
+        self._u = grid.at_node["surface_water__x_velocity"].reshape(nr, nc)
+        self._v = grid.at_node["surface_water__y_velocity"].reshape(nr, nc)
+        self._hu = grid.at_node["surface_water__x_momentum"].reshape(nr, nc)
+        self._hv = grid.at_node["surface_water__y_momentum"].reshape(nr, nc)
 
         # ── Manning's n ───────────────────────────────────────────────────
         if "mannings_n_at_node" in grid.at_node:
@@ -557,7 +627,7 @@ class RiverFlowDynamics_HLLC(Component):
         else:
             n_arr = np.asarray(mannings_n, dtype=float)
             if n_arr.ndim == 0:
-                self._n_2d = float(n_arr)               # scalar fast-path
+                self._n_2d = float(n_arr)  # scalar fast-path
             elif n_arr.size == grid.number_of_nodes:
                 self._n_2d = n_arr.reshape(nr, nc).copy()
             else:
@@ -569,16 +639,16 @@ class RiverFlowDynamics_HLLC(Component):
 
         # ── Wall BCs ──────────────────────────────────────────────────────
         walls = set(wall_edges) if wall_edges else set()
-        bad   = walls - {"left", "right", "bottom", "top"}
+        bad = walls - {"left", "right", "bottom", "top"}
         if bad:
             raise ValueError(
                 f"Unknown wall_edges: {bad}. "
                 "Choose from {{'left','right','bottom','top'}}."
             )
-        self._left_wall   = "left"   in walls
-        self._right_wall  = "right"  in walls
+        self._left_wall = "left" in walls
+        self._right_wall = "right" in walls
         self._bottom_wall = "bottom" in walls
-        self._top_wall    = "top"    in walls
+        self._top_wall = "top" in walls
 
         # ── Inflow BCs ────────────────────────────────────────────────────
         if fixed_entry_nodes is not None:
@@ -589,12 +659,18 @@ class RiverFlowDynamics_HLLC(Component):
                     "entry_nodes_h_values is required with fixed_entry_nodes."
                 )
             self._entry_h = np.asarray(entry_nodes_h_values, dtype=float)
-            self._entry_u = (np.zeros(n) if entry_nodes_u_values is None
-                             else np.asarray(entry_nodes_u_values, dtype=float))
-            self._entry_v = (np.zeros(n) if entry_nodes_v_values is None
-                             else np.asarray(entry_nodes_v_values, dtype=float))
+            self._entry_u = (
+                np.zeros(n)
+                if entry_nodes_u_values is None
+                else np.asarray(entry_nodes_u_values, dtype=float)
+            )
+            self._entry_v = (
+                np.zeros(n)
+                if entry_nodes_v_values is None
+                else np.asarray(entry_nodes_v_values, dtype=float)
+            )
             self._entry_rows = self._entry_nodes // nc
-            self._entry_cols = self._entry_nodes  % nc
+            self._entry_cols = self._entry_nodes % nc
         else:
             self._entry_nodes = None
 
@@ -605,31 +681,52 @@ class RiverFlowDynamics_HLLC(Component):
 
             if (exit_nodes_h_values is None) and (exit_nodes_eta_values is None):
                 raise ValueError(
-                    "Provide exit_nodes_h_values or exit_nodes_eta_values with fixed_exit_nodes."
+                    "Provide exit_nodes_h_values or exit_nodes_eta_values "
+                    "with fixed_exit_nodes."
                 )
 
-            self._exit_h = (None if exit_nodes_h_values is None
-                            else np.asarray(exit_nodes_h_values, dtype=float))
-            self._exit_eta = (None if exit_nodes_eta_values is None
-                              else np.asarray(exit_nodes_eta_values, dtype=float))
+            self._exit_h = (
+                None
+                if exit_nodes_h_values is None
+                else np.asarray(exit_nodes_h_values, dtype=float)
+            )
+            self._exit_eta = (
+                None
+                if exit_nodes_eta_values is None
+                else np.asarray(exit_nodes_eta_values, dtype=float)
+            )
 
-            self._exit_u = (None if exit_nodes_u_values is None
-                            else np.asarray(exit_nodes_u_values, dtype=float))
-            self._exit_v = (None if exit_nodes_v_values is None
-                            else np.asarray(exit_nodes_v_values, dtype=float))
+            self._exit_u = (
+                None
+                if exit_nodes_u_values is None
+                else np.asarray(exit_nodes_u_values, dtype=float)
+            )
+            self._exit_v = (
+                None
+                if exit_nodes_v_values is None
+                else np.asarray(exit_nodes_v_values, dtype=float)
+            )
 
             self._exit_rows = self._exit_nodes // nc
-            self._exit_cols = self._exit_nodes  % nc
+            self._exit_cols = self._exit_nodes % nc
 
             # Basic length checks
             if self._exit_h is not None and self._exit_h.size != m:
-                raise ValueError("exit_nodes_h_values must match fixed_exit_nodes length.")
+                raise ValueError(
+                    "exit_nodes_h_values must match fixed_exit_nodes length."
+                )
             if self._exit_eta is not None and self._exit_eta.size != m:
-                raise ValueError("exit_nodes_eta_values must match fixed_exit_nodes length.")
+                raise ValueError(
+                    "exit_nodes_eta_values must match fixed_exit_nodes length."
+                )
             if self._exit_u is not None and self._exit_u.size != m:
-                raise ValueError("exit_nodes_u_values must match fixed_exit_nodes length.")
+                raise ValueError(
+                    "exit_nodes_u_values must match fixed_exit_nodes length."
+                )
             if self._exit_v is not None and self._exit_v.size != m:
-                raise ValueError("exit_nodes_v_values must match fixed_exit_nodes length.")
+                raise ValueError(
+                    "exit_nodes_v_values must match fixed_exit_nodes length."
+                )
         else:
             self._exit_nodes = None
 
@@ -646,14 +743,13 @@ class RiverFlowDynamics_HLLC(Component):
 
     @property
     def elapsed_time(self):
-        #Total simulated time [s] since component creation.
+        # Total simulated time [s] since component creation.
         return self._t
 
     @property
     def current_dt(self):
-        #CFL-based adaptive time step for the next call [s].
-        return _dt(self._h, self._hu, self._hv,
-                   self._dx, self._dy, self._cfl, self._g)
+        # CFL-based adaptive time step for the next call [s].
+        return _dt(self._h, self._hu, self._hv, self._dx, self._dy, self._cfl, self._g)
 
     # ──────────────────────────────────────────────────────────────────────
     # Main stepping method
@@ -673,12 +769,12 @@ class RiverFlowDynamics_HLLC(Component):
         self._apply_outlet()
 
         if dt is None:
-            dt = _dt(self._h, self._hu, self._hv,
-                     self._dx, self._dy, self._cfl, self._g)
+            dt = _dt(
+                self._h, self._hu, self._hv, self._dx, self._dy, self._cfl, self._g
+            )
         else:
             dt = float(dt)
-            dt_cfl = _dt(self._h, self._hu, self._hv,
-                         self._dx, self._dy, 1.0, self._g)
+            dt_cfl = _dt(self._h, self._hu, self._hv, self._dx, self._dy, 1.0, self._g)
             if dt > dt_cfl:
                 warnings.warn(
                     f"Supplied dt={dt:.4g} s exceeds CFL-stable "
@@ -687,15 +783,24 @@ class RiverFlowDynamics_HLLC(Component):
                 )
 
         h_new, hu_new, hv_new = _step(
-            self._h, self._hu, self._hv, self._z,
-            self._dx, self._dy, dt,
-            n_2d=self._n_2d, g=self._g,
-            step_count=self._step_n, order=self._order,
-            left_wall=self._left_wall,    right_wall=self._right_wall,
-            bottom_wall=self._bottom_wall, top_wall=self._top_wall,
+            self._h,
+            self._hu,
+            self._hv,
+            self._z,
+            self._dx,
+            self._dy,
+            dt,
+            n_2d=self._n_2d,
+            g=self._g,
+            step_count=self._step_n,
+            order=self._order,
+            left_wall=self._left_wall,
+            right_wall=self._right_wall,
+            bottom_wall=self._bottom_wall,
+            top_wall=self._top_wall,
         )
 
-        self._h[:]  = h_new
+        self._h[:] = h_new
         self._hu[:] = hu_new
         self._hv[:] = hv_new
         self._apply_inflow()
@@ -706,7 +811,7 @@ class RiverFlowDynamics_HLLC(Component):
             self._populate_link_velocity()
 
         self._step_n += 1
-        self._t      += dt
+        self._t += dt
 
     # ──────────────────────────────────────────────────────────────────────
     # Link velocity helpers
@@ -724,23 +829,26 @@ class RiverFlowDynamics_HLLC(Component):
         -------
         vel : ndarray (n_links,)
         """
-        grid   = self._grid
+        grid = self._grid
         u_flat = self._u.ravel()
         v_flat = self._v.ravel()
-        vel    = np.zeros(grid.number_of_links)
+        vel = np.zeros(grid.number_of_links)
         hl = grid.horizontal_links
-        vel[hl] = 0.5 * (u_flat[grid.node_at_link_head[hl]] +
-                         u_flat[grid.node_at_link_tail[hl]])
+        vel[hl] = 0.5 * (
+            u_flat[grid.node_at_link_head[hl]] + u_flat[grid.node_at_link_tail[hl]]
+        )
         vl = grid.vertical_links
-        vel[vl] = 0.5 * (v_flat[grid.node_at_link_head[vl]] +
-                         v_flat[grid.node_at_link_tail[vl]])
+        vel[vl] = 0.5 * (
+            v_flat[grid.node_at_link_head[vl]] + v_flat[grid.node_at_link_tail[vl]]
+        )
         return vel
 
     def _populate_link_velocity(self):
         if "surface_water__velocity" not in self._grid.at_link:
             self._grid.add_zeros("surface_water__velocity", at="link")
-        self._grid.at_link["surface_water__velocity"][:] = \
-            np.abs(self.map_velocities_to_links())
+        self._grid.at_link["surface_water__velocity"][:] = np.abs(
+            self.map_velocities_to_links()
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Internal helpers
@@ -750,7 +858,7 @@ class RiverFlowDynamics_HLLC(Component):
         if self._entry_nodes is None:
             return
         r, c = self._entry_rows, self._entry_cols
-        self._h[r, c]  = self._entry_h
+        self._h[r, c] = self._entry_h
         self._hu[r, c] = self._entry_h * self._entry_u
         self._hv[r, c] = self._entry_h * self._entry_v
 
@@ -771,8 +879,7 @@ class RiverFlowDynamics_HLLC(Component):
         # artificially created or destroyed at a dry/partial outlet.
         if self._outlet_max_depth is not None:
             h_local = self._h[r, c]
-            h_set = np.where(h_local >= self._outlet_max_depth,
-                             h_set, h_local)
+            h_set = np.where(h_local >= self._outlet_max_depth, h_set, h_local)
 
         # Determine outlet momentum to impose.
         # If user supplies exit velocities, convert to momentum. Otherwise keep
@@ -788,14 +895,13 @@ class RiverFlowDynamics_HLLC(Component):
         else:
             hv_set = h_set * self._exit_v
 
-        self._h[r, c]  = h_set
+        self._h[r, c] = h_set
         self._hu[r, c] = hu_set
         self._hv[r, c] = hv_set
 
-
     def _update_derived(self):
         np.add(self._h, self._z, out=self._eta)
-        wet  = self._h > _H_DRY
-        ih   = np.where(wet, 1.0 / np.where(wet, self._h, 1.0), 0.0)
+        wet = self._h > _H_DRY
+        ih = np.where(wet, 1.0 / np.where(wet, self._h, 1.0), 0.0)
         np.multiply(self._hu, ih, out=self._u)
         np.multiply(self._hv, ih, out=self._v)

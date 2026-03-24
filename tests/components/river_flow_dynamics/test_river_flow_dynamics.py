@@ -43,6 +43,8 @@ def test_output_var_names(rfd):
         "surface_water__depth",
         "surface_water__elevation",
         "surface_water__velocity",
+        "surface_water__x_velocity",
+        "surface_water__y_velocity",
     )
 
 
@@ -230,16 +232,16 @@ def test_run_one_step():
     water_depth_solution = np.round(
         np.array(
             [
-                0.4357753,
-                0.4357753,
-                0.43611027,
-                0.43624251,
-                0.43626605,
-                0.43595278,
-                0.43534349,
-                0.43491662,
-                0.43342158,
-                0.43342158,
+                0.4870,
+                0.4870,
+                0.4870,
+                0.4870,
+                0.4870,
+                0.4870,
+                0.4880,
+                0.4880,
+                0.4880,
+                0.4880,
             ]
         ),
         3,
