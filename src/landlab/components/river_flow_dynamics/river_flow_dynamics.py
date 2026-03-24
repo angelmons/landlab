@@ -8,47 +8,86 @@ Written by Sebastian Bernal and Angel Monsalve.
 
 Compared to the version published on JOSS (v1.0), the current version includes:
 
-Numerical robustness (from NeedsVerification):
-- Cached raster link adjacency tables (_build_raster_link_tables): O(1) neighbor lookup
-- O(1) nearest-link mapping via integer index arithmetic on RasterModelGrid
-- Dynamic link-length mapping (_link_lengths) for correct dx/dy pressure gradients
-- Zero-Gradient (Neumann) open boundary conditions replacing unstable radiation BCs
-- mode="clip" in find_nearest_node to prevent grid-edge exceptions
-- min_chezy_depth floor to prevent singular Chezy friction in very thin films
-- max_pathline_substeps cap to prevent infinite loops in backward tracking
-- coord_tol floating-point guard for boundary hit detection
+Numerical robustness:
+- Cached raster link adjacency tables (_build_raster_link_tables): O(1) neighbour
+  lookup via precomputed _adj_hlinks / _adj_vlinks arrays, replacing the original
+  coordinate-search implementation that built O(N^2) temporary matrices on every
+  call.
+- O(1) nearest-link mapping in find_nearest_link via integer index arithmetic on
+  _hlink_id / _vlink_id grids, replacing an O(N^2) coordinate-search and
+  boolean-mask approach.
+- Dynamic link-length mapping (_link_lengths): assigns dx to horizontal links and
+  dy to vertical links for correct directional pressure gradient scaling in both
+  G-faces and velocity update.
+- Zero-Gradient (Neumann) open boundary conditions replacing the previous
+  depth-preserving form.
+- mode="clip" in find_nearest_node to prevent index-out-of-bounds exceptions at
+  grid edges.
+- min_chezy_depth floor in _compute_a_faces to prevent singular Chezy friction in
+  very thin films.
+- max_pathline_substeps cap in path_line_tracing to prevent infinite loops in
+  backward tracking.
+- coord_tol floating-point guard for boundary hit detection in path_line_tracing.
 
-Code architecture (from Enhanced):
-- Refactored run_one_step into ~12 private methods for maintainability
-- Public property accessors (wet_nodes, wet_links, water_depth, water_velocity)
-- Input validation in __init__ with clear error messages
-- np.broadcast_to(...).copy() fix (read-only view bug)
-- Precomputed topology masks (replaces O(N^2) list comprehensions every step)
-- Precomputed sparse matrix sparsity pattern (reused every step)
-- Sparse COO->CSR PCG solve with Jacobi preconditioner (core nodes only)
-- np.hypot for speed magnitude (numerically cleaner than manual sqrt)
-- In-place [:] field assignment in _write_grid_fields
-- Correct time-history ordering in _advance_time_history
+Code architecture:
+- Refactored run_one_step (previously a single ~35,000-character monolithic method)
+  into 12 private methods: _compute_a_faces, _advect_u_velocity,
+  _advect_v_velocity, _compute_g_faces, _solve_pressure_correction,
+  _apply_boundary_conditions_eta, _update_velocity,
+  _apply_boundary_conditions_vel, _update_depth, _write_grid_fields,
+  _advance_time_history, _find_upstream_nodes.
+- Public property accessors: wet_nodes, wet_links, water_depth, water_velocity.
+- Public property accessors elapsed_time and current_dt for API symmetry with
+  RiverFlowDynamics_HLLC, enabling drop-in substitution between the two
+  components.
+- Input validation in __init__ with clear error messages for dt, theta,
+  threshold_depth, and mannings_n.
+- np.broadcast_to(...).copy() fix for the read-only view bug on the initial
+  time-history arrays.
+- Precomputed topology arrays _core_adjacent_nodes and _core_adjacent_links used
+  to assemble the sparse pressure matrix each step, replacing per-step O(N^2)
+  list comprehensions. Note: the COO matrix is assembled fresh each step using
+  these precomputed arrays; the sparsity structure itself is not cached across
+  steps.
+- Sparse COO->CSR PCG solve with Jacobi preconditioner (core nodes only),
+  replacing the original dense A[np.ix_(core_nodes, core_nodes)] extraction and
+  solve.
+- np.hypot for speed magnitude (numerically cleaner than manual sqrt(u^2 + v^2)).
+- In-place [:] field assignment in _write_grid_fields to avoid per-step array
+  reallocation.
+- Correct time-history ordering in _advance_time_history (bug fix: original
+  overwrote time N before copying to N-1).
+- Two new output fields: surface_water__x_velocity and surface_water__y_velocity
+  (node-centred velocity components averaged from horizontal and vertical links
+  respectively), enabling direct velocity comparison with RiverFlowDynamics_HLLC.
+- Frictionless shortcut in _compute_a_faces: when mannings_n == 0, the Chezy
+  division is bypassed entirely (setting a_links = h_at_N_at_links directly) to
+  avoid a RuntimeWarning: divide by zero that was otherwise harmless but noisy.
 
-Boundary condition robustness (current version):
-- Stage-preserving zero-gradient outlet BC: enforces eta_b = eta_i (WSE continuity)
-  instead of the previous depth-preserving form eta_b = eta_i + z_i - z_b (h_b = h_i).
-  The old form incorrectly assigned positive depth to low-lying boundary cells on real
-  DEMs, seeding spurious wetting that cascaded through the depth-update logic.
-- Current-time interior values used in post-solve BC application: _apply_boundary_
-  conditions_eta and _apply_boundary_conditions_vel now use self._eta and self._vel
-  (time N+1) rather than self._eta_at_N and self._vel_at_N (time N), eliminating a
-  one-timestep lag at every open boundary node that caused reflection and artificial
-  storage near wetting fronts.
-- -1 sentinel removed from _open_boundary_links: links_at_node returns -1 for missing
-  directions on corner and edge nodes; the previous np.unique call preserved this
-  sentinel, causing a silent out-of-bounds write (self._h_at_links[-1] = ...) on every
-  timestep. The sentinel is now stripped immediately after collection.
-- closed_boundary_nodes parameter: allows the user to designate specific boundary nodes
-  as closed walls (zero flux, dry WSE). Nodes not listed as closed remain open (zero-
-  gradient). This is essential for complex-DEM simulations where only part of a grid
-  edge corresponds to a real channel outlet; leaving non-outlet floodplain boundary
-  nodes open produces systematic spurious inundation.
+Boundary condition robustness:
+- Stage-preserving zero-gradient outlet BC: enforces eta_b = eta_i (WSE
+  continuity) instead of the previous depth-preserving form
+  eta_b = eta_i + z_i - z_b (h_b = h_i). The old form incorrectly assigned
+  positive depth to low-lying boundary cells on real DEMs, seeding spurious
+  wetting that cascaded through the depth-update logic.
+- Current-time interior values used in post-solve BC application:
+  _apply_boundary_conditions_eta and _apply_boundary_conditions_vel now use
+  self._eta and self._vel (time N+1) rather than self._eta_at_N and
+  self._vel_at_N (time N), eliminating a one-timestep lag at every open boundary
+  node that caused reflection and artificial storage near wetting fronts.
+- -1 sentinel stripped from _open_boundary_links: links_at_node returns -1 for
+  missing directions on corner and edge nodes; the previous np.unique call
+  preserved this sentinel, causing a silent out-of-bounds write
+  (self._h_at_links[-1] = ...) on every timestep.
+- closed_boundary_nodes parameter: allows the user to designate specific boundary
+  nodes as impermeable walls (zero flux, dry WSE). Nodes not listed as closed
+  remain open (zero-gradient). Essential for complex-DEM simulations where only
+  part of a grid edge is a real channel outlet.
+- fixed_exit_nodes / exit_nodes_h_values / outlet_max_depth parameters: prescribe
+  a Dirichlet fixed-stage outlet BC at specified right-edge nodes, with an
+  optional outlet_max_depth ramp threshold that delays enforcement until local
+  depth exceeds a minimum value. Required for sloped-channel simulations where
+  the zero-gradient BC alone equilibrates to a flat (bathtub) water surface.
 
 Examples
 --------
@@ -394,7 +433,7 @@ class RiverFlowDynamics(Component):
                 at="node",
                 units=self._info["surface_water__y_velocity"]["units"],
             )
-        # Aliasing guard: if the user passed topographic__elevation directly into
+        # note: if the user passed topographic__elevation directly into
         # add_field("surface_water__elevation", te) without copy=True, both fields
         # share the same underlying array. The [:] in-place write in _write_grid_fields
         # would then corrupt topographic__elevation. Break the alias here.
@@ -408,13 +447,6 @@ class RiverFlowDynamics(Component):
                 ].copy()
 
         if "surface_water__elevation" not in grid.at_node:
-            # BUG FIX: must store physical WSE = h + z_topo so that
-            #   self._eta = field - (max_elevation + additional_z)
-            # correctly yields h - z_virtual.
-            # The previous code stored (h - z_virtual) in the field, then
-            # subtracted (max_elevation + additional_z) a second time,
-            # shifting self._eta ~(max_elevation+10) m too low and causing
-            # the pressure solve to converge to h=0 (WSE -> topo elevation).
             grid.add_field(
                 "surface_water__elevation",
                 (
@@ -475,11 +507,7 @@ class RiverFlowDynamics(Component):
         )
 
         self._open_boundary_nodes = grid.boundary_nodes
-        # BUG FIX: links_at_node returns -1 for missing directions on boundary
-        # nodes (corners have only 2 links; edges have 3). np.unique preserves
-        # the -1 sentinel as its first element, causing silent out-of-bounds
-        # index writes downstream (e.g. self._h_at_links[-1] = ... every step).
-        # Strip all -1 sentinels immediately after collection.
+
         self._open_boundary_links = np.unique(
             grid.links_at_node[self._open_boundary_nodes]
         )
@@ -1456,15 +1484,6 @@ class RiverFlowDynamics(Component):
             )
 
         # Zero-gradient on stage (WSE): copy current-time interior WSE directly.
-        # BUG FIX (stage-preserving): the previous form
-        #   eta_b = eta_i_N + z_i - z_b
-        # preserved depth (h_b = h_i) rather than stage (WSE_b = WSE_i). On a
-        # real DEM a boundary cell may sit lower than its interior neighbour, so
-        # the depth-preserving copy assigned spurious positive depth to dry
-        # boundary cells, seeding wetting that cascaded inward.
-        # BUG FIX (lag elimination): using self._eta[nodes_1_back] (current
-        # time N+1) instead of self._eta_at_N[nodes_1_back] (time N) removes
-        # the one-timestep lag at every open boundary node.
         self._eta[self._open_boundary_nodes] = self._eta[nodes_1_back]
 
         # Fixed-stage outlet BC (ramp-up: only activate when h >= outlet_max_depth)
@@ -1578,9 +1597,6 @@ class RiverFlowDynamics(Component):
         upstream_links = surrounding[[range(surrounding.shape[0])], rev][0]
 
         # Zero-Gradient: copy current-time velocity from upstream link.
-        # BUG FIX (lag elimination): using self._vel[upstream_links] (current
-        # time N+1, just updated) instead of self._vel_at_N[upstream_links]
-        # (time N) removes the one-timestep lag at every open boundary link.
         self._vel[open_bnd_active_links] = self._vel[upstream_links]
 
         # Closed boundary: enforce zero velocity on all links touching wall nodes.
