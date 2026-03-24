@@ -58,6 +58,13 @@ def test(session: nox.Session) -> None:
     session.install("-r", PATH["requirements"] / "testing.txt")
     install(session)
 
+    # session.posargs[0] (if present) is the wheel/wheelhouse path consumed by
+    # install(). Pytest args start at posargs[1:]. When no explicit test paths
+    # are given, default to the "tests" directory so that
+    #   nox -s test -- dist/
+    # does not accidentally point pytest at the dist/ folder.
+    pytest_args = session.posargs[1:] or ("tests",)
+
     session.run(
         "coverage",
         "run",
@@ -65,7 +72,7 @@ def test(session: nox.Session) -> None:
         "--branch",
         "--module",
         "pytest",
-        *(session.posargs or ()),
+        *pytest_args,
         env={"PYTEST_ADDOPTS": os.environ.get("PYTEST_ADDOPTS", "-m 'not richdem'")},
     )
     session.run("coverage", "report", "--ignore-errors", "--show-missing")
