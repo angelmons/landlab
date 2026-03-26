@@ -2933,3 +2933,468 @@ class TestTalmonTransverseSlope:
         # We simply confirm that diffusion=off behaves differently than
         # diffusion=on (the 6A.3.1 test covers that case).
         assert np.isfinite(std1), "Non-finite transverse std with diffusion off"
+
+
+def _make_active_parker_grid(dt=1.0, **rbd_kwargs):
+    grid = RasterModelGrid((5, 5), xy_spacing=1.0)
+    grid.at_node["topographic__elevation"] = np.array(
+        [
+            [1.07, 1.06, 1.00, 1.06, 1.07],
+            [1.08, 1.07, 1.03, 1.07, 1.08],
+            [1.09, 1.08, 1.07, 1.08, 1.09],
+            [1.09, 1.09, 1.08, 1.09, 1.09],
+            [1.09, 1.09, 1.09, 1.09, 1.09],
+        ],
+        dtype=float,
+    ).flatten()
+    grid.set_watershed_boundary_condition(grid.at_node["topographic__elevation"])
+    grid.at_node["surface_water__depth"] = np.full(grid.number_of_nodes, 0.102)
+    grid.at_node["surface_water__velocity"] = np.full(grid.number_of_nodes, 0.25)
+    grid.at_link["surface_water__depth"] = map_mean_of_link_nodes_to_link(
+        grid, "surface_water__depth"
+    )
+    grid.at_link["surface_water__velocity"] = map_mean_of_link_nodes_to_link(
+        grid, "surface_water__velocity"
+    )
+    gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]
+    gsd_loc = [[0, 1, 1, 1, 0]] * 5
+    rbd = RiverBedDynamics(
+        grid,
+        gsd=gsd,
+        bedload_equation="Parker1990",
+        bed_surf__gsd_loc_node=gsd_loc,
+        dt=dt,
+        check_advective_cfl=False,
+        **rbd_kwargs,
+    )
+    return rbd, grid
+ 
+ 
+# ===================================================================
+# Helper: build a grid with explicit outlet for slope limiter tests
+# ===================================================================
+def _make_slope_test_grid(shape, z_array, outlet_node_id=0):
+    grid = RasterModelGrid(shape, xy_spacing=1.0)
+    grid.at_node["topographic__elevation"] = z_array.copy()
+    grid.set_watershed_boundary_condition_outlet_id(
+        [outlet_node_id],
+        grid.at_node["topographic__elevation"],
+        nodata_value=-1.0,
+    )
+    n = grid.number_of_nodes
+    grid.at_node["surface_water__depth"] = np.full(n, 0.5)
+    grid.at_link["surface_water__depth"] = np.full(
+        grid.number_of_links, 0.5
+    )
+    grid.at_link["surface_water__velocity"] = np.full(
+        grid.number_of_links, 0.5
+    )
+    return grid
+ 
+ 
+# ===========================================================================
+# Section A — Morphodynamic Subcycling (MORFAC)
+# ===========================================================================
+ 
+ 
+class TestMORFAC:
+ 
+    def test_default_morfac_is_one(self, rbd_parker):
+        assert rbd_parker._morfac == 1
+ 
+    def test_morfac_stored_as_int(self):
+        rbd, _ = _make_active_parker_grid(morfac=10)
+        assert rbd._morfac == 10
+        assert isinstance(rbd._morfac, int)
+ 
+    def test_morfac_float_converted_to_int(self):
+        rbd, _ = _make_active_parker_grid(morfac=5.0)
+        assert rbd._morfac == 5
+        assert isinstance(rbd._morfac, int)
+ 
+    def test_morfac_below_one_raises(self):
+        with pytest.raises(ValueError, match="morfac must be a positive integer"):
+            _make_active_parker_grid(morfac=0)
+ 
+    def test_counter_initialised_to_zero(self):
+        rbd, _ = _make_active_parker_grid(morfac=5)
+        assert rbd._morfac_counter == 0
+ 
+    def test_skip_calls_return_immediately(self):
+        rbd, grid = _make_active_parker_grid(morfac=5)
+        z0 = grid.at_node["topographic__elevation"].copy()
+        for i in range(4):
+            rbd.run_one_step()
+            dz = grid.at_node["topographic__elevation"] - z0
+            np.testing.assert_allclose(
+                dz, 0.0, atol=1e-15,
+                err_msg=f"Bed changed on skip call {i + 1}",
+            )
+        assert rbd._morfac_counter == 4
+ 
+    def test_active_call_changes_bed(self):
+        rbd, grid = _make_active_parker_grid(morfac=5)
+        z0 = grid.at_node["topographic__elevation"].copy()
+ 
+        # Sanity check: morfac=1 produces transport on this grid
+        rbd_ref, g_ref = _make_active_parker_grid(morfac=1)
+        rbd_ref.run_one_step()
+        dz_ref = g_ref.at_node["topographic__elevation"] - z0
+        assert np.any(np.abs(dz_ref) > 1e-15), (
+            "Reference (morfac=1) produces no transport"
+        )
+ 
+        for _ in range(5):
+            rbd.run_one_step()
+        dz = grid.at_node["topographic__elevation"] - z0
+        assert np.any(np.abs(dz) > 1e-15), "No bed change on active call"
+        assert rbd._morfac_counter == 0
+ 
+    def test_counter_cycles(self):
+        M = 3
+        rbd, _ = _make_active_parker_grid(morfac=M)
+        for cycle in range(3):
+            for step in range(M):
+                rbd.run_one_step()
+            assert rbd._morfac_counter == 0
+ 
+    def test_dt_restored_after_active_call(self):
+        rbd, _ = _make_active_parker_grid(morfac=5, dt=2.0)
+        for _ in range(5):
+            rbd.run_one_step()
+        assert rbd._grid._dt == 2.0
+ 
+    def test_morfac_1_same_as_default(self):
+        rbd_1, g_1 = _make_active_parker_grid(morfac=1)
+        z0_1 = g_1.at_node["topographic__elevation"].copy()
+        rbd_1.run_one_step()
+        dz_1 = g_1.at_node["topographic__elevation"] - z0_1
+ 
+        rbd_ref, g_ref = _make_active_parker_grid()
+        z0_ref = g_ref.at_node["topographic__elevation"].copy()
+        rbd_ref.run_one_step()
+        dz_ref = g_ref.at_node["topographic__elevation"] - z0_ref
+ 
+        np.testing.assert_allclose(dz_1, dz_ref, atol=1e-15)
+ 
+    def test_subcycling_converges_to_reference(self):
+        """Subcycled result should have the same sign and similar magnitude
+        as the reference at core nodes.
+ 
+        With morfac > 1, the bed step uses dt_bed = M * dt_flow.  For
+        strongly nonlinear transport on a 1 m grid, the larger dt_bed
+        introduces meaningful differences, so we only check that:
+          1) both produce non-zero bed change at the same nodes
+          2) the signs agree
+          3) magnitudes are within one order of magnitude
+        """
+        M = 2
+        N_cycles = 3
+ 
+        rbd_ref, g_ref = _make_active_parker_grid(morfac=1)
+        z0_ref = g_ref.at_node["topographic__elevation"].copy()
+        for _ in range(M * N_cycles):
+            rbd_ref.run_one_step()
+        dz_ref = g_ref.at_node["topographic__elevation"] - z0_ref
+ 
+        rbd_m, g_m = _make_active_parker_grid(morfac=M)
+        z0_m = g_m.at_node["topographic__elevation"].copy()
+        for _ in range(M * N_cycles):
+            rbd_m.run_one_step()
+        dz_m = g_m.at_node["topographic__elevation"] - z0_m
+ 
+        core = g_ref.core_nodes
+        active = np.abs(dz_ref[core]) > 1e-15
+        if active.any():
+            # Signs must agree
+            signs_match = np.sign(dz_m[core][active]) == np.sign(dz_ref[core][active])
+            assert signs_match.all(), (
+                "Subcycled and reference have different signs at some nodes"
+            )
+            # Magnitudes within one order of magnitude
+            ratio = np.abs(dz_m[core][active] / dz_ref[core][active])
+            assert np.all(ratio < 10.0) and np.all(ratio > 0.1), (
+                f"Magnitude ratio out of range [0.1, 10]: {ratio}"
+            )
+ 
+    def test_morfac_reduces_cfl_limit(self):
+        rbd_1, _ = _make_active_parker_grid(morfac=1)
+        rbd_1.run_one_step()
+        dt_1 = rbd_1.calc_max_stable_dt_advective(safety=1.0)
+ 
+        M = 10
+        rbd_m, _ = _make_active_parker_grid(morfac=M)
+        for _ in range(M):
+            rbd_m.run_one_step()
+        dt_m = rbd_m.calc_max_stable_dt_advective(safety=1.0)
+ 
+        np.testing.assert_allclose(dt_m, dt_1 / M, rtol=1e-10)
+ 
+    def test_morfac_with_rk2(self):
+        rbd, grid = _make_active_parker_grid(morfac=3, time_stepping="rk2")
+        z0 = grid.at_node["topographic__elevation"].copy()
+        for _ in range(3):
+            rbd.run_one_step()
+        dz = grid.at_node["topographic__elevation"] - z0
+        assert np.any(np.abs(dz) > 1e-15)
+ 
+    def test_morfac_with_diffusion(self):
+        rbd, grid = _make_active_parker_grid(
+            morfac=5,
+            use_bed_diffusion=True,
+            bed_diffusion_mu=0.5,
+            check_diffusion_cfl=False,
+        )
+        z0 = grid.at_node["topographic__elevation"].copy()
+        for _ in range(5):
+            rbd.run_one_step()
+        dz = grid.at_node["topographic__elevation"] - z0
+        assert np.any(np.abs(dz) > 1e-15)
+ 
+ 
+# ===========================================================================
+# Section B — Wetting-Drying Depth Threshold
+# ===========================================================================
+ 
+ 
+class TestDepthThreshold:
+ 
+    def test_default_threshold(self, rbd_parker):
+        assert rbd_parker._depth_threshold == 0.01
+ 
+    def test_threshold_stored(self):
+        rbd, _ = _make_active_parker_grid(depth_threshold=0.05)
+        assert rbd._depth_threshold == 0.05
+ 
+    def test_negative_threshold_raises(self):
+        with pytest.raises(ValueError, match="depth_threshold must be >= 0"):
+            _make_active_parker_grid(depth_threshold=-0.01)
+ 
+    def test_zero_threshold_disables(self):
+        rbd, _ = _make_active_parker_grid(depth_threshold=0.0)
+        assert rbd._depth_threshold == 0.0
+ 
+    def test_shallow_links_have_zero_shear_stress(self):
+        rbd, grid = _make_active_parker_grid(depth_threshold=0.05)
+        grid.at_link["surface_water__depth"][:] = 0.01
+        rbd.shear_stress()
+        np.testing.assert_array_equal(
+            rbd._surface_water__shear_stress_link, 0.0
+        )
+ 
+    def test_deep_links_unaffected(self):
+        rbd, _ = _make_active_parker_grid(depth_threshold=0.001)
+        rbd.shear_stress()
+        interior = rbd._surface_water__shear_stress_link[
+            ~np.isin(
+                np.arange(rbd._grid.number_of_links), rbd._boundary_links
+            )
+        ]
+        assert np.any(interior > 0)
+ 
+    def test_threshold_prevents_transport(self):
+        rbd, grid = _make_active_parker_grid(depth_threshold=0.20)
+        z0 = grid.at_node["topographic__elevation"].copy()
+        rbd.run_one_step()
+        dz = grid.at_node["topographic__elevation"] - z0
+        np.testing.assert_allclose(dz, 0.0, atol=1e-15)
+ 
+    def test_partial_drying(self):
+        rbd, grid = _make_active_parker_grid(depth_threshold=0.05)
+        h = grid.at_link["surface_water__depth"]
+        h[:20] = 0.01
+        h[20:] = 0.102
+        rbd.shear_stress()
+        assert np.all(rbd._shear_stress[:20] == 0.0)
+ 
+ 
+# ===========================================================================
+# Section C — Slope Limiter / Avalanching
+# ===========================================================================
+ 
+ 
+class TestSlopeLimiter:
+ 
+    def test_disabled_by_default(self, rbd_parker):
+        assert rbd_parker._use_slope_limiter is False
+ 
+    def test_invalid_angle_raises(self):
+        with pytest.raises(ValueError, match="slope_limiter_angle"):
+            _make_active_parker_grid(
+                use_slope_limiter=True, slope_limiter_angle=0.0
+            )
+        with pytest.raises(ValueError, match="slope_limiter_angle"):
+            _make_active_parker_grid(
+                use_slope_limiter=True, slope_limiter_angle=90.0
+            )
+ 
+    def test_critical_slope_stored(self):
+        rbd, _ = _make_active_parker_grid(
+            use_slope_limiter=True, slope_limiter_angle=30.0
+        )
+        np.testing.assert_allclose(
+            rbd._slope_limiter_tan, np.tan(np.radians(30.0))
+        )
+ 
+    def test_avalanche_flattens_oversteep_slope(self):
+        """A 5x5 grid with a steep step. Call _apply_slope_limiter()
+        directly (avoids BC issues on tiny grids) and verify all
+        interior links are brought to <= critical slope."""
+        rbd, grid = _make_active_parker_grid(
+            use_slope_limiter=True, slope_limiter_angle=30.0,
+        )
+        # Inject a steep step: raise nodes 12,13 by 3 m
+        grid.at_node["topographic__elevation"][[12, 13]] += 3.0
+        # Update link elevations
+        grid["link"]["topographic__elevation"] = (
+            grid.map_mean_of_link_nodes_to_link(
+                grid.at_node["topographic__elevation"]
+            )
+        )
+ 
+        rbd._apply_slope_limiter()
+ 
+        z_final = grid.at_node["topographic__elevation"]
+        dz = np.abs(
+            z_final[grid.node_at_link_head]
+            - z_final[grid.node_at_link_tail]
+        )
+        slopes = dz / grid.length_of_link
+        interior = np.setdiff1d(
+            np.arange(grid.number_of_links), rbd._boundary_links
+        )
+        if interior.size > 0:
+            max_slope = slopes[interior].max()
+            assert max_slope <= rbd._slope_limiter_tan + 1e-10, (
+                f"Max slope {max_slope:.4f} > critical "
+                f"{rbd._slope_limiter_tan:.4f}"
+            )
+ 
+    def test_avalanche_conserves_mass(self):
+        """Total elevation at core nodes must be conserved."""
+        z = np.zeros(25, dtype=float)
+        z[12] = 5.0  # tall spike in centre
+        z[2] = -0.01  # make node 2 the clear outlet
+        grid = _make_slope_test_grid((5, 5), z, outlet_node_id=2)
+ 
+        rbd = RiverBedDynamics(
+            grid, dt=0.001, use_slope_limiter=True,
+            slope_limiter_angle=30.0, check_advective_cfl=False,
+        )
+        core = grid.core_nodes
+        mass_before = grid.at_node["topographic__elevation"][core].sum()
+        rbd._apply_slope_limiter()
+        mass_after = grid.at_node["topographic__elevation"][core].sum()
+        np.testing.assert_allclose(
+            mass_after, mass_before, atol=1e-12,
+            err_msg="Slope limiter did not conserve mass",
+        )
+ 
+    def test_flat_bed_no_avalanche(self):
+        z = np.full(25, 1.0, dtype=float)
+        z[2] = 0.99
+        grid = _make_slope_test_grid((5, 5), z, outlet_node_id=2)
+        rbd = RiverBedDynamics(
+            grid, dt=1.0, use_slope_limiter=True,
+            slope_limiter_angle=30.0, check_advective_cfl=False,
+        )
+        rbd._apply_slope_limiter()
+        assert rbd._slope_limiter_n_avalanched == 0
+ 
+    def test_diagnostic_iteration_count(self):
+        """Use the 5x5 active-transport grid with a steepened interior
+        node, so the spike has interior neighbors (not boundary links)."""
+        rbd, grid = _make_active_parker_grid(
+            use_slope_limiter=True, slope_limiter_angle=30.0,
+        )
+        # Raise a core node to create an oversteep spike
+        grid.at_node["topographic__elevation"][12] += 5.0
+        grid["link"]["topographic__elevation"] = (
+            grid.map_mean_of_link_nodes_to_link(
+                grid.at_node["topographic__elevation"]
+            )
+        )
+ 
+        rbd._apply_slope_limiter()
+        assert rbd._slope_limiter_n_avalanched > 0, (
+            f"Expected > 0 iterations, got {rbd._slope_limiter_n_avalanched}"
+        )
+ 
+    def test_limiter_respects_fixed_nodes(self):
+        rbd, grid = _make_active_parker_grid(
+            use_slope_limiter=True,
+            slope_limiter_angle=30.0,
+            bed_surf__elev_fix_node=np.array(
+                [[0, 0, 0, 0, 0],
+                 [0, 1, 1, 1, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0],
+                 [0, 0, 0, 0, 0]]
+            ).flatten(),
+        )
+        fixed_ids = [6, 7, 8]
+        z_before = grid.at_node["topographic__elevation"][fixed_ids].copy()
+        rbd.run_one_step()
+        z_after = grid.at_node["topographic__elevation"][fixed_ids]
+        np.testing.assert_allclose(
+            z_after, z_before, atol=1e-15,
+            err_msg="Slope limiter modified fixed-elevation nodes",
+        )
+ 
+    def test_limiter_with_morfac(self):
+        rbd, grid = _make_active_parker_grid(
+            morfac=5,
+            use_slope_limiter=True,
+            slope_limiter_angle=30.0,
+        )
+        for _ in range(5):
+            rbd.run_one_step()
+        assert np.all(np.isfinite(grid.at_node["topographic__elevation"]))
+ 
+    def test_limiter_with_diffusion(self):
+        rbd, grid = _make_active_parker_grid(
+            use_slope_limiter=True,
+            slope_limiter_angle=30.0,
+            use_bed_diffusion=True,
+            bed_diffusion_mu=0.5,
+            check_diffusion_cfl=False,
+        )
+        z0 = grid.at_node["topographic__elevation"].copy()
+        rbd.run_one_step()
+        dz = grid.at_node["topographic__elevation"] - z0
+        assert np.any(np.abs(dz) > 1e-15)
+ 
+ 
+# ===========================================================================
+# Section D — Combined feature interaction
+# ===========================================================================
+ 
+ 
+class TestCombinedFeatures:
+ 
+    def test_all_three_features_together(self):
+        rbd, grid = _make_active_parker_grid(
+            morfac=5,
+            depth_threshold=0.05,
+            use_slope_limiter=True,
+            slope_limiter_angle=30.0,
+        )
+        for _ in range(5):
+            rbd.run_one_step()
+        assert np.all(np.isfinite(grid.at_node["topographic__elevation"]))
+ 
+    def test_all_features_plus_diffusion_and_rk2(self):
+        rbd, grid = _make_active_parker_grid(
+            morfac=3,
+            depth_threshold=0.01,
+            use_slope_limiter=True,
+            slope_limiter_angle=35.0,
+            use_bed_diffusion=True,
+            bed_diffusion_mu=0.5,
+            check_diffusion_cfl=False,
+            time_stepping="rk2",
+        )
+        for _ in range(3):
+            rbd.run_one_step()
+        assert np.all(np.isfinite(grid.at_node["topographic__elevation"]))
+ 

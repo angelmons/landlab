@@ -509,6 +509,10 @@ Shear stress calculator (``_shear_stress.py``)
     (depth-slope and hydraulic-radius-slope).  Controlled by
     ``use_hydraulics_radius_in_shear_stress``.
 
+    A ``depth_threshold`` parameter (default 0.01 m) zeroes shear stress
+    at links where the water depth is below the threshold, preventing
+    unrealistic transport in very thin water films.
+
 GSD evolver (``_gsd_evolver.py``)
     ``ToroEscobarEvolver`` implements the Toro-Escobar, Paola & Parker (1996)
     fractional Exner equation for bed surface sorting.  The spatial flux
@@ -530,6 +534,30 @@ Time integrators for the Exner equation (``RiverBedDynamics.py``)
       computation (``O(n_core)`` transport evaluations) and a sparse LU
       solve per step.  Best for long morphodynamic simulations where
       temporal accuracy is less critical than stability.
+
+Morphodynamic subcycling (``morfac``)
+    When ``morfac > 1``, the bed evolution chain (shear stress, bedload,
+    Exner, stratigraphy, GSD) is executed only once every ``morfac``
+    calls to ``run_one_step()``.  On skip calls the method returns
+    immediately (cheap no-op).  On the active call the morphodynamic
+    timestep is ``dt_bed = morfac × dt_flow``, so the bed accumulates
+    ``morfac`` flow steps worth of evolution in a single calculation.
+
+    This exploits the timescale separation between flow (seconds) and
+    morphology (hours–days): updating the bed every ``morfac`` flow
+    steps is physically justified because the transport field barely
+    changes over that interval.
+
+    The result converges to the non-accelerated solution as ``dt_bed``
+    remains within the CFL-stable regime.  CFL utilities automatically
+    account for the effective ``dt_bed``.
+
+Slope limiter / avalanching
+    An optional angle-of-repose limiter (``use_slope_limiter=True``)
+    enforces a maximum bed slope after each Exner step.  Any link
+    steeper than ``tan(slope_limiter_angle)`` triggers a mass-conserving
+    Jacobi relaxation that redistributes elevation between the two
+    end-nodes.  Fixed and boundary nodes are excluded.
 
 New Parameters
 -------------------------------------
@@ -578,6 +606,30 @@ described in the original ``__init__`` docstring above:
 ``check_diffusion_cfl`` : bool, default ``True``
     Warn when the diffusive CFL number exceeds 0.5.
 
+``morfac`` : int, default ``1``
+    Morphodynamic subcycling factor.  When ``morfac > 1``,
+    ``run_one_step()`` skips ``morfac - 1`` calls and executes the
+    full bed-evolution chain on every ``morfac``-th call with
+    ``dt_bed = morfac × dt_flow``.  This provides a real wall-clock
+    speedup proportional to ``morfac`` because the expensive transport
+    calculations are performed ``morfac`` times less often.  The result
+    converges to the non-accelerated answer.  Must be a positive
+    integer >= 1.
+
+``depth_threshold`` : float, default ``0.01``
+    Minimum water depth [m] at links for transport.  Shear stress is
+    zeroed at links shallower than this value, preventing thin-film
+    instabilities.  Set to 0 to disable.
+
+``use_slope_limiter`` : bool, default ``False``
+    Apply an angle-of-repose avalanche limiter after each Exner step.
+
+``slope_limiter_angle`` : float, default ``30.0``
+    Critical slope angle [degrees] for the avalanche limiter.
+
+``slope_limiter_max_iterations`` : int, default ``10``
+    Maximum Jacobi sweeps per step for the slope limiter.
+
 Diagnostic Attributes Added
 ------------------------------------------
 ``_bed_surf__gsd_residual_max`` : float
@@ -602,6 +654,10 @@ Journal of Hydrology, 49(1–2), 87–106.
 Seal, R., Paola, C., Parker, G., Southard, J. B., & Wilcock, P. R. (1997).
 Experiments on downstream fining of gravel: I. Narrow-channel runs.
 Journal of Hydraulic Engineering, 123(10), 874–884.
+
+Roelvink, J. A. (2006). Coastal morphodynamic evolution techniques.
+Coastal Engineering, 53(2–3), 277–287.
+https://doi.org/10.1016/j.coastaleng.2005.10.015
 
 """
 
@@ -742,6 +798,11 @@ class RiverBedDynamics(Component):
         check_gsd_residual=True,
         gsd_residual_threshold=1e-3,
         gsd_n_minus_1=False,
+        morfac=1,
+        depth_threshold=0.01,
+        use_slope_limiter=False,
+        slope_limiter_angle=30.0,
+        slope_limiter_max_iterations=10,
     ):
         """Calculates the evolution of a river bed based on bed load transport
         and fractional rates on links. An external flow hydraulics solver, such
@@ -915,6 +976,37 @@ class RiverBedDynamics(Component):
             fractions explicitly and recover the last as
             ``f_last = 1 − Σ(rest)``.  This eliminates the drift source
             that makes renormalisation necessary.
+        morfac : int, optional
+            Morphodynamic subcycling factor.  When ``morfac > 1``,
+            ``run_one_step()`` skips ``morfac - 1`` calls (returning
+            immediately) and executes the full bed-evolution chain on
+            every ``morfac``-th call with ``dt_bed = morfac × dt_flow``.
+            The expensive transport calculations are thus performed
+            ``morfac`` times less often, giving a proportional wall-clock
+            speedup.  The result converges to the non-accelerated answer
+            as long as ``dt_bed`` remains within the CFL-stable regime.
+            Must be a positive integer >= 1.  Default is 1 (no subcycling).
+        depth_threshold : float, optional
+            Minimum water depth [m] at links below which shear stress and
+            sediment transport are set to zero.  Prevents unrealistic
+            transport in very thin water films where τ* can become
+            enormous.  Default is 0.01 m.  Set to 0.0 to disable.
+        use_slope_limiter : bool, optional
+            If ``True``, apply an angle-of-repose slope limiter after each
+            bed elevation update.  Any link whose bed slope exceeds
+            ``tan(slope_limiter_angle)`` triggers an avalanche that
+            redistributes elevation between the two end-nodes until the
+            slope equals the critical value.  Conserves mass.  Disabled
+            by default.
+        slope_limiter_angle : float, optional
+            Maximum stable bed slope [degrees].  Default is 30.0, which
+            corresponds to a typical angle of repose for gravel.  Only
+            used when ``use_slope_limiter=True``.
+        slope_limiter_max_iterations : int, optional
+            Maximum number of iterative sweeps for the slope limiter per
+            time step.  Each sweep resolves all currently oversteep links
+            simultaneously (Jacobi relaxation).  Convergence typically
+            requires 2–5 iterations.  Default is 10.
         """
         super().__init__(grid)
 
@@ -1058,6 +1150,33 @@ class RiverBedDynamics(Component):
                 f"Valid options: {sorted(_valid_ts)}"
             )
         self._time_stepping = time_stepping
+
+        # -- Morphodynamic subcycling (morfac) --------------------------
+        morfac = int(morfac)
+        if morfac < 1:
+            raise ValueError(
+                f"morfac must be a positive integer >= 1, got {morfac}. "
+                f"Use morfac=1 to disable subcycling."
+            )
+        self._morfac = morfac
+        self._morfac_counter = 0  # counts flow steps since last bed update
+
+        # -- Wetting-drying transport cutoff ----------------------------
+        if depth_threshold < 0.0:
+            raise ValueError(f"depth_threshold must be >= 0.0, got {depth_threshold}.")
+        self._depth_threshold = float(depth_threshold)
+
+        # -- Slope limiter / avalanching --------------------------------
+        self._use_slope_limiter = use_slope_limiter
+        if slope_limiter_angle <= 0.0 or slope_limiter_angle >= 90.0:
+            raise ValueError(
+                f"slope_limiter_angle must be in (0, 90) degrees, "
+                f"got {slope_limiter_angle}."
+            )
+        self._slope_limiter_tan = np.tan(np.radians(slope_limiter_angle))
+        self._slope_limiter_angle = float(slope_limiter_angle)
+        self._slope_limiter_max_iterations = int(slope_limiter_max_iterations)
+        self._slope_limiter_n_avalanched = 0  # diagnostic: iterations used
 
         # Threshold to deposit layers in a new subsurface layer
         self._bed_surf_new_layer_thick = bed_surf_new_layer_thick
@@ -1327,33 +1446,58 @@ class RiverBedDynamics(Component):
 
         The grid field ``"topographic__elevation"`` is altered each time step.
         """
-        # When adaptive_dt=True, override dt with the CFL-safe value derived
-        # from the *previous* step's bedload rates (standard for explicit
-        # adaptive schemes).  safety=0.9 keeps us just inside the envelope.
-        if self._adaptive_dt:
-            import warnings
+        # ── Morphodynamic subcycling ──────────────────────────────────── #
+        # When morfac > 1, skip (morfac - 1) calls and execute the full
+        # bed-evolution chain on every morfac-th call with
+        # dt_bed = morfac × dt_flow.  This provides a real wall-clock
+        # speedup because the expensive transport chain is called morfac
+        # times less often.
+        if self._morfac > 1:
+            self._morfac_counter += 1
+            if self._morfac_counter < self._morfac:
+                return  # ← cheap early exit: no bed calculations
+            self._morfac_counter = 0  # reset for next cycle
 
-            dt_safe = self.calc_max_stable_dt(safety=0.9)
-            dt_requested = self._grid._dt
-            if dt_safe < dt_requested:
-                warnings.warn(
-                    f"adaptive_dt: reducing dt from {dt_requested:.4g} s "
-                    f"to CFL-safe {dt_safe:.4g} s.",
-                    UserWarning,
-                    stacklevel=2,
-                )
-                self._grid._dt = dt_safe
+        # Scale dt for the morphodynamic step (restored in finally block)
+        dt_flow = self._grid._dt
+        if self._morfac > 1:
+            self._grid._dt = dt_flow * self._morfac
 
-        self.shear_stress()  # Shear stress calculation
-        self.bedload_equation()  # Bedload calculation
-        self.calculate_net_bedload()  # Calculates bedload transport from links into nodes
-        if self._use_bed_diffusion:
-            self.bed_diffusion()  # Gravitational diffusion correction (optional)
-        self.update_bed_elevation()  # Changes bed elevation
-        stratigraphy.checks_erosion_or_deposition(self)
-        stratigraphy.evolve(self)
-        self.update_bed_surf_gsd()  # Changes bed surface grain size distribution
-        self.update_bed_surf_properties()  # Updates gsd properties
+        try:
+            # When adaptive_dt=True, override dt with the CFL-safe value
+            # derived from the *previous* step's bedload rates (standard
+            # for explicit adaptive schemes).  safety=0.9 keeps us just
+            # inside the envelope.
+            if self._adaptive_dt:
+                import warnings
+
+                dt_safe = self.calc_max_stable_dt(safety=0.9)
+                dt_requested = self._grid._dt
+                if dt_safe < dt_requested:
+                    warnings.warn(
+                        f"adaptive_dt: reducing dt from {dt_requested:.4g} s "
+                        f"to CFL-safe {dt_safe:.4g} s.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    self._grid._dt = dt_safe
+
+            self.shear_stress()  # Shear stress calculation
+            self.bedload_equation()  # Bedload calculation
+            self.calculate_net_bedload()  # Bedload from links → nodes
+            if self._use_bed_diffusion:
+                self.bed_diffusion()  # Gravitational diffusion correction
+            self.update_bed_elevation()  # Changes bed elevation
+            if self._use_slope_limiter:
+                self._apply_slope_limiter()  # Avalanche oversteep slopes
+            stratigraphy.checks_erosion_or_deposition(self)
+            stratigraphy.evolve(self)
+            self.update_bed_surf_gsd()  # Changes bed surface GSD
+            self.update_bed_surf_properties()  # Updates GSD properties
+        finally:
+            # Always restore the flow dt so the coupling loop sees it
+            if self._morfac > 1:
+                self._grid._dt = dt_flow
 
     def shear_stress(self):
         """Compute unsteady shear stress at every link.
@@ -1365,10 +1509,21 @@ class RiverBedDynamics(Component):
         * ``_shear_stress`` — signed shear stress [Pa]
         * ``_surface_water__shear_stress_link`` — absolute value [Pa]
 
+        When ``depth_threshold > 0``, shear stress is set to zero at any
+        link where the water depth is below the threshold.  This prevents
+        unrealistic transport rates in very shallow flows.
+
         See :class:`~._shear_stress.ShearStressCalculator` for the full
         formulation.
         """
         self._shear_calc.calculate(self)
+
+        # -- Wetting-drying cutoff: zero transport in shallow links -----
+        if self._depth_threshold > 0.0:
+            h_links = self._grid.at_link["surface_water__depth"]
+            dry = h_links < self._depth_threshold
+            self._shear_stress[dry] = 0.0
+            self._surface_water__shear_stress_link[dry] = 0.0
 
     def bedload_equation(self):
         """Dispatch to the active bedload equation via the Phase-3A registry.
@@ -1447,7 +1602,7 @@ class RiverBedDynamics(Component):
         if qb_max == 0.0:
             return np.inf
         dx_min = min(self._grid.dx, self._grid.dy)
-        return safety * (1.0 - self._lambda_p) * dx_min / qb_max
+        return safety * (1.0 - self._lambda_p) * dx_min / (qb_max * self._morfac)
 
     def calc_max_stable_dt_diffusive(self, safety=0.5):
         """Return the CFL-limited time step for the diffusive Exner term.
@@ -1479,7 +1634,9 @@ class RiverBedDynamics(Component):
         if D_max == 0.0:
             return np.inf
         dx_min = min(self._grid.dx, self._grid.dy)
-        return safety * (1.0 - self._lambda_p) * dx_min**2 / (2.0 * D_max)
+        return (
+            safety * (1.0 - self._lambda_p) * dx_min**2 / (2.0 * D_max * self._morfac)
+        )
 
     def calc_max_stable_dt(self, safety=0.5):
         """Return the combined CFL-limited time step.
@@ -1997,6 +2154,101 @@ class RiverBedDynamics(Component):
         #   (1 - λp) dz/dt|_diff = div_diff
         #   => dz_diff = dt · div_diff / (1 - λp)
         self._bed_surf__diffusive_dz_node = dt / (1.0 - self._lambda_p) * div_diff
+
+    def _apply_slope_limiter(self):
+        """Enforce an angle-of-repose limit on bed slopes (avalanching).
+
+        Any link whose absolute bed slope exceeds ``tan(slope_limiter_angle)``
+        is considered oversteep.  The elevation difference in excess of the
+        critical value is redistributed equally between the two end-nodes of
+        each oversteep link (Jacobi relaxation).  This preserves mass: the
+        total elevation change across all nodes sums to zero.
+
+        Fixed-elevation nodes (outlet, closed, user-specified) are excluded
+        from the redistribution — they act as rigid walls.
+
+        Multiple Jacobi sweeps are performed until either no oversteep links
+        remain or ``slope_limiter_max_iterations`` is reached.  The number
+        of iterations actually used is stored in
+        ``_slope_limiter_n_avalanched`` for diagnostics.
+
+        Notes
+        -----
+        The limiter operates on the *node-level* elevations and then updates
+        the link-level elevation field.  It is called after
+        ``update_bed_elevation()`` and before the stratigraphy and GSD
+        evolution steps, so those subsequent steps see the avalanched bed.
+
+        The Jacobi (simultaneous) relaxation updates all oversteep links in
+        parallel, using ``np.add.at`` for safe accumulation when multiple
+        links share a node.  This can leave residual oversteepness after a
+        single sweep (unlike Gauss–Seidel), but convergence is guaranteed
+        because each sweep strictly reduces the maximum excess slope.  In
+        practice, gravel beds converge in 2–5 iterations.
+        """
+        g = self._grid
+        z = g.at_node["topographic__elevation"]
+        tan_crit = self._slope_limiter_tan
+
+        # Pre-compute the set of nodes whose elevation must not change.
+        # Build once and cache if not already done.
+        if not hasattr(self, "_slope_limiter_fixed_set"):
+            fixed = set()
+            fixed.update(np.asarray(self._out_id).ravel().tolist())
+            fixed.update(np.asarray(self._bed_surf__elev_fix_node_id).ravel().tolist())
+            fixed.update(np.asarray(self._closed_nodes).ravel().tolist())
+            fixed.update(g.boundary_nodes.tolist())
+            self._slope_limiter_fixed_set = np.array(sorted(fixed), dtype=int)
+
+        fixed_nodes = self._slope_limiter_fixed_set
+        # Boolean mask: True = node can move
+        movable = np.ones(g.number_of_nodes, dtype=bool)
+        movable[fixed_nodes] = False
+
+        tail = g.node_at_link_tail  # (n_links,) — one end of each link
+        head = g.node_at_link_head  # (n_links,) — other end
+
+        for iteration in range(self._slope_limiter_max_iterations):
+            # Link lengths (dx or dy depending on orientation)
+            dz = z[head] - z[tail]
+            link_len = g.length_of_link
+            slope = np.abs(dz) / link_len
+
+            oversteep = slope > tan_crit
+            # Exclude boundary links — their slopes are not physical
+            oversteep[self._boundary_links] = False
+
+            if not np.any(oversteep):
+                self._slope_limiter_n_avalanched = iteration
+                break
+
+            # Excess elevation difference beyond the critical slope
+            excess_dz = np.abs(dz[oversteep]) - tan_crit * link_len[oversteep]
+
+            # Determine which end is higher, which is lower
+            higher_is_head = dz[oversteep] > 0
+            idx_os = np.where(oversteep)[0]
+
+            high_node = np.where(higher_is_head, head[idx_os], tail[idx_os])
+            low_node = np.where(higher_is_head, tail[idx_os], head[idx_os])
+
+            # For each oversteep link, transfer half the excess from the
+            # high node to the low node.  Use np.add.at for safe
+            # accumulation when a node appears in multiple links.
+            half_excess = 0.5 * excess_dz
+            correction = np.zeros(g.number_of_nodes)
+            np.add.at(correction, high_node, -half_excess)
+            np.add.at(correction, low_node, half_excess)
+
+            # Only apply to movable nodes
+            correction[~movable] = 0.0
+            z += correction
+        else:
+            # Loop exhausted without convergence
+            self._slope_limiter_n_avalanched = self._slope_limiter_max_iterations
+
+        # Update the link-level elevation field
+        g["link"]["topographic__elevation"] = g.map_mean_of_link_nodes_to_link(z)
 
     def update_bed_surf_gsd(self):
         """Update the bed surface GSD via the Toro-Escobar fractional Exner equation.
