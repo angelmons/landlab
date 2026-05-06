@@ -1,7 +1,7 @@
 """
 Unit tests for landlab.components.river_flow_dynamics.RiverFlowDynamics
 
-last updated: 11/11/2024
+last updated: 05/05/2026
 """
 
 import numpy as np
@@ -514,3 +514,104 @@ def test_analytical_solution():
     vel_difference = np.abs(vel_solution - vel_obtained)
 
     assert np.max(vel_difference) < 0.01  # Max difference in vel
+
+
+def test_fixed_exit_nodes_holds_outlet_depth():
+    """Fixed-stage outlet BC should clamp outlet depth to the prescribed value.
+
+    Exercises the ramp-up branch of the exit-node BC (use_target = True once
+    h_local >= outlet_max_depth) and the depth update at exit nodes.
+    """
+    grid = RasterModelGrid((6, 10), xy_spacing=0.1)
+    grid.add_zeros("topographic__elevation", at="node")
+    grid.add_zeros("surface_water__depth", at="node")
+    grid.add_zeros("surface_water__elevation", at="node")
+    grid.add_zeros("surface_water__velocity", at="link")
+
+    # Mild slope so the flow stays subcritical
+    grid.at_node["topographic__elevation"] = grid.x_of_node * 0.01
+
+    fixed_entry_nodes = grid.nodes_at_left_edge
+    fixed_entry_links = grid.links_at_node[fixed_entry_nodes][:, 0]
+    entry_nodes_h_values = 0.3 * np.ones_like(fixed_entry_nodes)
+    entry_links_vel_values = 0.4 * np.ones_like(fixed_entry_links)
+
+    fixed_exit_nodes = grid.nodes_at_right_edge
+    exit_nodes_h_values = 0.3 * np.ones_like(fixed_exit_nodes)
+
+    rfd = RiverFlowDynamics(
+        grid,
+        dt=0.05,
+        mannings_n=0.012,
+        fixed_entry_nodes=fixed_entry_nodes,
+        fixed_entry_links=fixed_entry_links,
+        entry_nodes_h_values=entry_nodes_h_values,
+        entry_links_vel_values=entry_links_vel_values,
+        fixed_exit_nodes=fixed_exit_nodes,
+        exit_nodes_h_values=exit_nodes_h_values,
+        outlet_max_depth=0.3,
+    )
+
+    for _ in range(300):
+        rfd.run_one_step()
+
+    outlet_depths = grid.at_node["surface_water__depth"][fixed_exit_nodes]
+    np.testing.assert_allclose(outlet_depths, 0.3, atol=5e-3, rtol=0.0)
+
+
+def test_fixed_exit_nodes_requires_h_values():
+    """Passing fixed_exit_nodes without exit_nodes_h_values should raise."""
+    grid = RasterModelGrid((6, 6), xy_spacing=0.1)
+    grid.add_zeros("topographic__elevation", at="node")
+    grid.add_zeros("surface_water__depth", at="node")
+    grid.add_zeros("surface_water__elevation", at="node")
+    grid.add_zeros("surface_water__velocity", at="link")
+
+    with pytest.raises(ValueError, match="exit_nodes_h_values is required"):
+        RiverFlowDynamics(
+            grid,
+            fixed_exit_nodes=grid.nodes_at_right_edge,
+            exit_nodes_h_values=None,
+        )
+
+
+def test_closed_boundary_nodes_act_as_walls():
+    """Closed boundary nodes should remain dry regardless of inflow."""
+    grid = RasterModelGrid((6, 10), xy_spacing=0.1)
+    grid.add_zeros("topographic__elevation", at="node")
+    grid.add_zeros("surface_water__depth", at="node")
+    grid.add_zeros("surface_water__elevation", at="node")
+    grid.add_zeros("surface_water__velocity", at="link")
+
+    grid.at_node["topographic__elevation"] = grid.x_of_node * 0.01
+
+    fixed_entry_nodes = grid.nodes_at_left_edge
+    fixed_entry_links = grid.links_at_node[fixed_entry_nodes][:, 0]
+    entry_nodes_h_values = 0.3 * np.ones_like(fixed_entry_nodes)
+    entry_links_vel_values = 0.4 * np.ones_like(fixed_entry_links)
+
+    # Top and bottom edges act as impermeable walls
+    closed_boundary_nodes = np.concatenate(
+        [grid.nodes_at_top_edge, grid.nodes_at_bottom_edge]
+    )
+
+    rfd = RiverFlowDynamics(
+        grid,
+        dt=0.05,
+        mannings_n=0.012,
+        fixed_entry_nodes=fixed_entry_nodes,
+        fixed_entry_links=fixed_entry_links,
+        entry_nodes_h_values=entry_nodes_h_values,
+        entry_links_vel_values=entry_links_vel_values,
+        closed_boundary_nodes=closed_boundary_nodes,
+    )
+
+    for _ in range(50):
+        rfd.run_one_step()
+
+    # Note: the four corner nodes are unconditionally re-averaged after the
+    # closed-boundary enforcement (see _apply_boundary_conditions), so we
+    # check only the non-corner closed walls.
+    non_corner_walls = np.setdiff1d(closed_boundary_nodes, grid.corner_nodes)
+    wall_depths = grid.at_node["surface_water__depth"][non_corner_walls]
+    assert np.all(wall_depths < 1e-6)

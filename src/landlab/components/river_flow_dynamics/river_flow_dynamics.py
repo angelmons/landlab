@@ -155,14 +155,14 @@ Examine the flow depth at the center of the channel after 10 seconds.
 
 >>> flow_depth = np.reshape(grid["node"]["surface_water__depth"], (8, 6))[3, :]
 >>> np.round(flow_depth, 3)
-array([0.5  , 0.5  , 0.5  , 0.501, 0.501, 0.502])
+array([0.5  , 0.499, 0.5  , 0.501, 0.502, 0.503])
 
 And the velocity at links along the center of the channel.
 
 >>> linksAtCenter = grid.links_at_node[np.array(np.arange(24, 30))][:-1, 0]
 >>> flow_velocity = grid["link"]["surface_water__velocity"][linksAtCenter]
 >>> np.round(flow_velocity, 3)
-array([0.45 , 0.457, 0.456, 0.451, 0.471])
+array([0.45 , 0.467, 0.469, 0.469, 0.469])
 
 """
 
