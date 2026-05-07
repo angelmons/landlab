@@ -2,7 +2,8 @@
 Shear stress calculator for RiverBedDynamics.
 
 Extracts the unsteady friction-slope shear stress computation from the main
-component into a focused, testable class.
+component into a focused, testable class.  The logic is identical to the
+original ``RiverBedDynamics.shear_stress()`` method; only the housing changed.
 
 Unsteady shear stress at links
 -------------------------------
@@ -20,13 +21,7 @@ where the unsteady friction slope is::
 
     sf = S₀ − ∂h/∂s − (U/g) ∂U/∂s − (1/g) ∂U/∂t
 
-When ``variable_fluid_properties=True`` is set on the parent
-``RiverBedDynamics`` component, ρ is a per-link array updated each timestep
-from ``rbd._rho`` (temperature-corrected via Heggen 1983).  When the flag is
-``False`` (default) the behaviour is identical to v1: a single scalar rho is
-used throughout.
-
-.. codeauthor:: Angel Monsalve
+.. codeauthor:: Angel Monsalve (original implementation)
 """
 
 from __future__ import annotations
@@ -49,12 +44,52 @@ class ShearStressCalculator:
     read directly from the ``rbd`` component passed to :meth:`calculate`.
     The calculator holds no mutable state of its own between calls.
 
+    Attribute contract
+    ~~~~~~~~~~~~~~~~~~
+    This class reads the following private attributes from the
+    ``RiverBedDynamics`` instance.  Every name here matches exactly what
+    ``RiverBedDynamics.__init__`` and ``cache_topology()`` store:
+
+    ==========================================  =====================================
+    Attribute on ``rbd``                        Set in ``RiverBedDynamics`` as
+    ==========================================  =====================================
+    ``rbd._grid``                               ``self._grid``
+    ``rbd._g``                                  ``self._g = scipy.constants.g``
+    ``rbd._rho``                                ``self._rho``  (scalar or per-link
+                                                ndarray when
+                                                ``variable_fluid_properties=True``)
+    ``rbd._topo_du_ds_scratch``                 ``self._topo_du_ds_scratch``
+    ``rbd._topo_horizontal_links``              ``self._topo_horizontal_links``
+    ``rbd._topo_vertical_links``                ``self._topo_vertical_links``
+    ``rbd._scratch_area``                       ``self._scratch_area``
+    ``rbd._scratch_perimeter``                  ``self._scratch_perimeter``
+    ``rbd._surface_water__velocity_prev_time_link``
+                                                ``self._surface_water__velocity_prev_time_link``
+    ``rbd._boundary_links``                     ``self._boundary_links``
+    ==========================================  =====================================
+
+    Written back to ``rbd`` each call:
+
+    ==========================================  =====================================
+    ``rbd._dz_ds``                              bed-slope gradient [m m⁻¹]
+    ``rbd._u``                                  link velocity [m s⁻¹]
+    ``rbd._shear_stress``                       signed shear stress [Pa]
+    ``rbd._surface_water__shear_stress_link``   absolute shear stress [Pa]
+    ==========================================  =====================================
+
+    Depth threshold
+    ~~~~~~~~~~~~~~~
+    The wetting-drying cutoff (zeroing shear stress at links shallower than
+    ``_depth_threshold``) is applied by ``RiverBedDynamics.shear_stress()``
+    **after** this calculator returns, not here.  That keeps ownership clear:
+    this class is responsible only for the physics; the caller decides the
+    transport mask.
+
     Temperature-aware density
     ~~~~~~~~~~~~~~~~~~~~~~~~~
-    ``rbd._rho`` may now be either a scalar float (legacy, default) or a
-    per-link ndarray (when ``rbd._variable_fluid_properties is True``).
-    NumPy broadcasting handles both cases identically in the shear-stress
-    expressions, so no conditional logic is required here.
+    ``rbd._rho`` may be a scalar float (default) or a per-link ndarray (when
+    ``variable_fluid_properties=True``).  ``np.broadcast_to`` handles both
+    cases identically without conditional logic or data copies.
     """
 
     def __init__(self, use_hydraulics_radius: bool = False) -> None:
@@ -65,8 +100,8 @@ class ShearStressCalculator:
         use_hydraulics_radius : bool, optional
             When ``True``, compute shear stress as ``τ = ρ g R_h sf`` using
             the hydraulic radius ``R_h = A / P`` (cross-sectional area over
-            wetted perimeter). When ``False`` (default), use the simpler
-            depth-slope product ``τ = ρ g h sf``. The hydraulic-radius
+            wetted perimeter).  When ``False`` (default), use the simpler
+            depth-slope product ``τ = ρ g h sf``.  The hydraulic-radius
             formulation is more accurate for wide channels where the aspect
             ratio is not very large.
         """
@@ -75,90 +110,77 @@ class ShearStressCalculator:
     def calculate(self, rbd) -> None:
         """Compute shear stress at every link and store results on *rbd*.
 
-        Reads all required fields from the RiverBedDynamics component
-        instance ``rbd`` and writes back:
+        Reads all required fields from the ``RiverBedDynamics`` instance
+        ``rbd`` and writes back ``_dz_ds``, ``_u``, ``_shear_stress``, and
+        ``_surface_water__shear_stress_link``.
 
-        * ``rbd._dz_ds``                            — bed-slope gradient at links [m m⁻¹]
-        * ``rbd._u``                                — current link velocity [m s⁻¹]
-        * ``rbd._shear_stress``                     — signed shear stress at links [Pa]
-        * ``rbd._surface_water__shear_stress_link`` — absolute value [Pa]
+        The wetting-drying depth cutoff is **not** applied here; it is
+        applied by ``RiverBedDynamics.shear_stress()`` immediately after
+        this call returns.
 
         Parameters
         ----------
         rbd : RiverBedDynamics
-            The component instance. Must have been initialised so that all
-            fields (topographic elevation, water depth/velocity, cached
-            topology arrays) are available.
+            The component instance.  Must have completed ``__init__`` and
+            ``cache_topology()`` so all required private attributes exist.
         """
-        g = rbd._grid
+        g = rbd._grid  # Landlab RasterModelGrid
 
         # ── S₀ = −∂z/∂s ──────────────────────────────────────────────────
         z = g.at_node["topographic__elevation"]
         rbd._dz_ds = -g.calc_grad_at_link(z)
 
-        # ── ∂h/∂s ────────────────────────────────────────────────────────
+        # ── ∂h/∂s ─────────────────────────────────────────────────────────
         h = g["node"]["surface_water__depth"]
         dh_ds = g.calc_grad_at_link(h)
         h_links = g.at_link["surface_water__depth"]
 
-        # ── ∂U/∂s — velocity gradient at links ───────────────────────────
+        # ── ∂U/∂s — velocity gradient at links ────────────────────────────
         rbd._u = g["link"]["surface_water__velocity"]
         du_ds = rbd._topo_du_ds_scratch
-        du_ds[:] = 0.0  # reset pre-allocated scratch (no malloc)
+        du_ds[:] = 0.0  # reset pre-allocated scratch array (avoids malloc)
 
-        # Horizontal component — use Landlab's built-in horizontal mapper
+        # Horizontal links
         u_nodes_h = g.map_mean_of_horizontal_links_to_node(rbd._u)
         hl = rbd._topo_horizontal_links
         du_ds[hl] = g.calc_grad_at_link(u_nodes_h)[hl]
 
-        # Vertical component — reshape, reverse, finite-difference, restore
+        # Vertical links — reshape, reverse row order, finite-difference, restore
         u_nodes_v = g.map_mean_of_vertical_links_to_node(rbd._u)
         u_nodes_v = u_nodes_v.reshape(g._shape[0], g._shape[1])[::-1, :]
-        du_ds_v = -np.diff(u_nodes_v, axis=0) / g.dy  # vectorised 1B
+        du_ds_v = -np.diff(u_nodes_v, axis=0) / g.dy
         vl = rbd._topo_vertical_links
         du_ds[vl] = np.flip(du_ds_v.T, axis=1).flatten(order="F")
 
-        # ── ∂U/∂t — rate of change of velocity ───────────────────────────
+        # ── ∂U/∂t — temporal velocity gradient ────────────────────────────
         u_prev = rbd._surface_water__velocity_prev_time_link
         du_dt = (rbd._u - u_prev) / g._dt
 
-        # ── Friction slope sf ─────────────────────────────────────────────
+        # ── Friction slope sf ──────────────────────────────────────────────
         sf = rbd._dz_ds - dh_ds - (rbd._u / rbd._g) * du_ds - du_dt / rbd._g
 
-        # ── Per-link density ─────────────────────────────────────────────
-        # rbd._rho is a scalar (legacy) when variable_fluid_properties=False,
-        # or a per-link ndarray when variable_fluid_properties=True.
-        # np.broadcast_to makes both cases work identically in all expressions
-        # below without any conditional logic or data copies.
-        rho = np.broadcast_to(np.asarray(rbd._rho), h_links.shape)
+        # ── Per-link density (scalar or ndarray) ───────────────────────────
+        # np.broadcast_to works for both scalar rho (default) and per-link
+        # ndarray rho (variable_fluid_properties=True).  Returns a read-only
+        # view with no copy; arithmetic below allocates the output array.
+        rho = np.broadcast_to(np.asarray(rbd._rho, dtype=float), h_links.shape)
 
-        # ── Shear stress at links ─────────────────────────────────────────
+        # ── Shear stress ───────────────────────────────────────────────────
         if self._use_hydraulics_radius:
-            hl = rbd._topo_horizontal_links
-            vl = rbd._topo_vertical_links
-            area = rbd._scratch_area          # pre-allocated scratch (1D)
+            area = rbd._scratch_area        # pre-allocated; shape (n_links,)
             perimeter = rbd._scratch_perimeter
             area[hl] = h_links[hl] * g.dx
             area[vl] = h_links[vl] * g.dy
-            perimeter[hl] = g.dx + 2 * h_links[hl]
-            perimeter[vl] = g.dy + 2 * h_links[vl]
+            perimeter[hl] = g.dx + 2.0 * h_links[hl]
+            perimeter[vl] = g.dy + 2.0 * h_links[vl]
             rh = area / perimeter
             rbd._shear_stress = rho * rbd._g * rh * sf
         else:
             rbd._shear_stress = rho * rbd._g * h_links * sf
 
-        # ── Boundary condition — zero flux at border links ────────────────
-        rbd._shear_stress[rbd._boundary_links] = 0
+        # ── Zero shear stress at boundary links ────────────────────────────
+        rbd._shear_stress[rbd._boundary_links] = 0.0
         rbd._surface_water__shear_stress_link = np.abs(rbd._shear_stress)
-
-        # ── Depth threshold — zero transport in very shallow water ────────
-        # Mirrors the depththreshold cutoff in run_one_step. Ensures that
-        # per-link density arrays do not propagate unrealistic tau values
-        # from near-dry cells into the bedload equations.
-        if hasattr(rbd, "_depth_threshold") and rbd._depth_threshold > 0.0:
-            dry = h_links < rbd._depth_threshold
-            rbd._shear_stress[dry] = 0.0
-            rbd._surface_water__shear_stress_link[dry] = 0.0
 
     def __repr__(self) -> str:  # pragma: no cover
         """Return a short string showing the active shear-stress formulation."""

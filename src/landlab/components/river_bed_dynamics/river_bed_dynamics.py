@@ -761,6 +761,38 @@ class RiverBedDynamics(Component):
             "mapping": "node",
             "doc": "Land surface topographic elevation",
         },
+        "surface_water__density": {
+            "dtype": float,
+            "intent": "out",
+            "optional": True,
+            "units": "kg m^-3",
+            "mapping": "link",
+            "doc": "Water density at links, temperature-corrected (Heggen 1983)",
+        },
+        "surface_water__dynamic_viscosity": {
+            "dtype": float,
+            "intent": "out",
+            "optional": True,
+            "units": "Pa s",
+            "mapping": "link",
+            "doc": "Dynamic viscosity at links, temperature-corrected (Heggen 1983)",
+        },
+        "surface_water__viscous_sublayer_thickness": {
+            "dtype": float,
+            "intent": "out",
+            "optional": True,
+            "units": "m",
+            "mapping": "link",
+            "doc": "Viscous sublayer thickness delta_v = 11.6 nu / u*",
+        },
+        "surface_water__critical_shields_stress": {
+            "dtype": float,
+            "intent": "out",
+            "optional": True,
+            "units": "-",
+            "mapping": "link",
+            "doc": "Dimensionless critical Shields stress (Paphitis 2001, temperature-aware)",
+        },
     }
 
     def __init__(
@@ -1566,12 +1598,13 @@ class RiverBedDynamics(Component):
         * ``_shear_stress`` — signed shear stress [Pa]
         * ``_surface_water__shear_stress_link`` — absolute value [Pa]
 
-        When ``depth_threshold > 0``, shear stress is set to zero at any
-        link where the water depth is below the threshold.  This prevents
-        unrealistic transport rates in very shallow flows.
+        After the calculator returns, if ``depth_threshold > 0`` this method
+        zeroes shear stress at any link whose water depth is below the
+        threshold, preventing unrealistic transport in very thin films.
+        Ownership is explicit: :class:`ShearStressCalculator` handles only
+        the physics; this method applies the transport mask.
 
-        See :class:`~._shear_stress.ShearStressCalculator` for the full
-        formulation.
+        See :class:`ShearStressCalculator` for the full formulation.
         """
         self._shear_calc.calculate(self)
 

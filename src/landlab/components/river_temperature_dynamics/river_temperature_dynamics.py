@@ -63,7 +63,7 @@ Initialize water temperature with a warm inflow at the left edge.
 Instantiate and run for 10 minutes with 60 s steps.
 
 >>> rtd = RiverTemperatureDynamics(grid, shade_factor=0.3)
->>> dt = 60.0
+>>> dt = 60.0`
 >>> for _ in range(10):
 ...     rtd.run_one_step(dt)
 ...     grid.at_node["surface_water__temperature"][left_edge] = 20.0
