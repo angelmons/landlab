@@ -25,6 +25,7 @@ Examples
 
 >>> import numpy as np
 >>> from landlab import RasterModelGrid
+>>> from landlab.components import RiverTemperatureDynamics
 
 Create a small 5 x 8 grid with 10 m spacing.
 
@@ -103,7 +104,25 @@ class RiverTemperatureDynamics(Component):
     grid : RasterModelGrid
         A grid.
     rho : float, optional
-        Water density. Default = 1000 kg/m^3
+        Water density [kg/m^3]. Used as a constant when
+        ``variable_water_properties=False`` (default). Default = 1000.0
+variable_water_properties : bool, optional
+        If ``True``, water density and dynamic viscosity are recomputed
+        each timestep from the local temperature field using the
+        Heggen (1983) empirical equations:
+
+        .. math::
+
+            \\rho = 1000 \\left(1 - 1.9549 \\times 10^{-5}
+            |T - 4|^{1.68}\\right)
+
+        .. math::
+
+            \\mu = \\left(0.20319 + 1.5883\\,e^{-T^{0.9}/22}
+            \\right) \\times 10^{-3}
+
+        Both ``self._rho`` and ``self._mu`` become node-arrays when
+        this option is active. Default = False
     cp : float, optional
         Specific heat capacity of water. Default = 4186 J/(kg*C)
     shade_factor : float, optional
@@ -265,6 +284,7 @@ class RiverTemperatureDynamics(Component):
         self,
         grid,
         rho=1000.0,
+        variable_water_properties=False,
         cp=4186.0,
         shade_factor=0.2,
         h_ws=2.0,
@@ -286,8 +306,16 @@ class RiverTemperatureDynamics(Component):
         super().__init__(grid)
 
         # Physical parameters
-        self._rho = rho
+        self._variable_water_properties = variable_water_properties
+        # If variable_water_properties is True, rho is computed each step
+        # from Heggen (1983); the scalar passed here is kept as a fallback
+        # reference and used when variable_water_properties is False.
+        self._rho_ref = rho
+        self._rho = rho  # scalar fallback; overwritten per-step when variable
         self._cp = cp
+        # Dynamic viscosity [Pa s] — constant default, overwritten per-step
+        # when variable_water_properties is True.
+        self._mu = 1.002e-3  # ~20 °C reference value
         self._shade_factor = shade_factor
         self._h_ws = h_ws
         self._rug_terreno = rug_terreno
@@ -483,8 +511,58 @@ class RiverTemperatureDynamics(Component):
         b_sel = np.select(conditions, b1, default=b1[-1])
         return (a_sel + T * b_sel) * 0.01
 
+
+    @staticmethod
+    def _rho_heggen(T):
+        """Water density as a function of temperature (Heggen, 1983).
+
+        Parameters
+        ----------
+        T : float or np.ndarray
+            Water temperature [deg C].
+
+        Returns
+        -------
+        float or np.ndarray
+            Water density [kg/m^3].
+        """
+        T = np.asarray(T, dtype=float)
+        return 1000.0 * (1.0 - 1.9549e-5 * np.abs(T - 4.0) ** 1.68)
+
+    @staticmethod
+    def _mu_heggen(T):
+        """Dynamic viscosity as a function of temperature (Heggen, 1983).
+
+        Parameters
+        ----------
+        T : float or np.ndarray
+            Water temperature [deg C].
+
+        Returns
+        -------
+        float or np.ndarray
+            Dynamic viscosity [Pa s].
+        """
+        T = np.asarray(T, dtype=float)
+        return (0.20319 + 1.5883 * np.exp(-(T ** 0.9) / 22.0)) * 1e-3
+
+    def _update_water_properties(self):
+        """Recompute rho and mu from the current temperature field.
+
+        Called at the start of each ``atmospheric_net_heat_exchange`` step
+        when ``variable_water_properties=True``. Updates ``self._rho`` and
+        ``self._mu`` as node-arrays matching the temperature field so that
+        all subsequent flux calculations use spatially varying values.
+        When ``variable_water_properties=False`` (default) both properties
+        keep the scalar values set at initialisation.
+        """
+        if self._variable_water_properties:
+            self._rho = self._rho_heggen(self._T)
+            self._mu  = self._mu_heggen(self._T)
+
     def atmospheric_net_heat_exchange(self, dt):
         """Calculate the net heat flux (including bed and GW) and update temperature."""
+        self._update_water_properties()
         T = self._T
         Ta = self._T_air
         RH = self._RH

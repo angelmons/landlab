@@ -803,6 +803,8 @@ class RiverBedDynamics(Component):
         use_slope_limiter=False,
         slope_limiter_angle=30.0,
         slope_limiter_max_iterations=10,
+        water_temperature=20.0,
+        variable_fluid_properties=False,
     ):
         """Calculates the evolution of a river bed based on bed load transport
         and fractional rates on links. An external flow hydraulics solver, such
@@ -1011,7 +1013,26 @@ class RiverBedDynamics(Component):
         super().__init__(grid)
 
         self._g = scipy.constants.g  # Acceleration due to gravity (m/s**2).
+        # Water temperature effects
         self._rho = rho
+        from ._fluid_properties import water_density, water_viscosity
+    
+        self._water_temperature = water_temperature   # stored, may be updated by RiverTemperatureDynamics
+        self._variable_fluid_properties = variable_fluid_properties
+    
+        if variable_fluid_properties:
+            # Initialise per-link arrays from the scalar or array temperature
+            T = np.broadcast_to(
+                np.asarray(water_temperature, dtype=float),
+                (grid.number_of_links,),
+            )
+            self._rho = water_density(T)         # overrides the scalar rho param
+            self._mu  = water_viscosity(T)
+        else:
+            # Backward-compatible: scalar constants, mu defaults to 20 °C value
+            self._mu = water_viscosity(20.0)     # scalar — only used for Re_s
+        # end of water temperature effects
+        
         self._rho_s = rho_s
         self._R = (rho_s - rho) / rho
 
@@ -1499,6 +1520,42 @@ class RiverBedDynamics(Component):
             if self._morfac > 1:
                 self._grid._dt = dt_flow
 
+    def update_fluid_properties(self, T: float | np.ndarray) -> None:
+        """Update rho and mu from a new temperature field.
+
+        Call this every timestep when RiverTemperatureDynamics is active:
+
+            temp_component.run_one_step(dt)
+            rbd.update_fluid_properties(
+                grid.at_link["surface_water__temperature"]
+            )
+            rbd.run_one_step(dt)
+
+        Parameters
+        ----------
+        T : float or ndarray
+            Water temperature [°C].  Scalar or per-link array.
+        """
+        from ._fluid_properties import water_density, water_viscosity
+        T_arr = np.broadcast_to(
+            np.asarray(T, dtype=float), (self._grid.number_of_links,)
+        )
+        self._water_temperature = T_arr
+        self._rho = water_density(T_arr)
+        self._mu  = water_viscosity(T_arr)
+
+    @property
+    def water_density_link(self) -> np.ndarray:
+        return np.broadcast_to(
+            np.asarray(self._rho), (self._grid.number_of_links,)
+        )
+
+    @property
+    def water_dynamic_viscosity_link(self) -> np.ndarray:
+        return np.broadcast_to(
+            np.asarray(self._mu), (self._grid.number_of_links,)
+        )
+    
     def shear_stress(self):
         """Compute unsteady shear stress at every link.
 
