@@ -157,20 +157,69 @@ def _swe_flux_x(h, hu, hv, g):
 
 
 def _wave_speeds(hL, uL, hR, uR, g):
-    cL = np.sqrt(g * np.maximum(hL, 0.0))
-    cR = np.sqrt(g * np.maximum(hR, 0.0))
-    sqL = np.sqrt(np.maximum(hL, 0.0))
-    sqR = np.sqrt(np.maximum(hR, 0.0))
+    """HLLC wave-speed estimates with dry-front correction.
+
+    Uses Einfeldt-Roe estimates on wet/wet interfaces (the standard choice)
+    and the two-rarefaction (dry-front) estimates of Brufau et al. (2002) /
+    Toro (2001 §10.5.1) on wet/dry interfaces.  The dry-front correction is
+    essential for correct propagation speed of the wetting front in
+    dam-break problems on a dry bed: at a wet/dry interface the standard
+    Einfeldt-Roe estimate collapses to S_R ≈ u_L + c_L/√2, whereas the
+    physically correct value from the positive Riemann invariant across
+    the rarefaction is S_R = u_L + 2 c_L (and symmetrically for dry/wet).
+
+    References
+    ----------
+    Brufau, Vázquez-Cendón, García-Navarro (2002).  A numerical model for
+        flooding and drying of irregular domains.  IJNMF 39, 247–275.
+    Toro, E.F. (2001).  *Shock-Capturing Methods for Free-Surface Shallow
+        Flows*, §10.5.1.
+    """
+    hL = np.maximum(hL, 0.0)
+    hR = np.maximum(hR, 0.0)
+    cL = np.sqrt(g * hL)
+    cR = np.sqrt(g * hR)
+
+    wetL = hL > _H_DRY
+    wetR = hR > _H_DRY
+
+    # --- wet/wet : Einfeldt-Roe ---
+    sqL = np.sqrt(hL)
+    sqR = np.sqrt(hR)
     den = sqL + sqR
     safe = den > 0.0
     u_roe = np.where(safe, (sqL * uL + sqR * uR) / np.where(safe, den, 1.0), 0.0)
-    c_roe = np.sqrt(g * 0.5 * (np.maximum(hL, 0.0) + np.maximum(hR, 0.0)))
-    SL = np.minimum(uL - cL, u_roe - c_roe)
-    SR = np.maximum(uR + cR, u_roe + c_roe)
+    c_roe = np.sqrt(g * 0.5 * (hL + hR))
+    SL_ww = np.minimum(uL - cL, u_roe - c_roe)
+    SR_ww = np.maximum(uR + cR, u_roe + c_roe)
+
+    # --- wet/dry : two-rarefaction (rarefaction reaches dry front) ---
+    SL_wd = uL - cL
+    SR_wd = uL + 2.0 * cL
+
+    # --- dry/wet : two-rarefaction, mirror of above ---
+    SL_dw = uR - 2.0 * cR
+    SR_dw = uR + cR
+
+    # --- per-face selection ---
+    wet_wet = wetL & wetR
+    wet_dry = wetL & ~wetR
+    dry_wet = ~wetL & wetR
+    # dry/dry → SL = SR = 0; flux is then identically zero (face skipped)
+
+    SL = np.where(wet_wet, SL_ww,
+         np.where(wet_dry, SL_wd,
+         np.where(dry_wet, SL_dw, 0.0)))
+    SR = np.where(wet_wet, SR_ww,
+         np.where(wet_dry, SR_wd,
+         np.where(dry_wet, SR_dw, 0.0)))
+
+    # --- contact-wave speed S* (standard formula, clamped to [SL, SR]) ---
     num = hR * uR * (uR - SR) - hL * uL * (uL - SL) + 0.5 * g * (hR**2 - hL**2)
     dstar = hR * (uR - SR) - hL * (uL - SL)
     sf = np.abs(dstar) > 1e-14
     S_star = np.where(sf, num / np.where(sf, dstar, 1.0), 0.5 * (uL + uR))
+    S_star = np.minimum(np.maximum(S_star, SL), SR)
     return SL, SR, S_star
 
 
@@ -252,10 +301,31 @@ def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1, left_wall=False, right_wall=Fa
     hv_p = _pad(hv, left_wall, right_wall, negate=False)
 
     if order == 2:
-        etaL, etaR = _muscl_x(eta_p)
-        zL, zR = _muscl_x(z_p)
-        huL, huR = _muscl_x(hu_p)
-        hvL, hvR = _muscl_x(hv_p)
+        # MUSCL second-order reconstruction
+        etaL_2, etaR_2 = _muscl_x(eta_p)
+        zL_2, zR_2 = _muscl_x(z_p)
+        huL_2, huR_2 = _muscl_x(hu_p)
+        hvL_2, hvR_2 = _muscl_x(hv_p)
+        # First-order (cell-centered) face values for the wet/dry fallback
+        etaL_1, etaR_1 = eta_p[:, :-1], eta_p[:, 1:]
+        zL_1, zR_1 = z_p[:, :-1], z_p[:, 1:]
+        huL_1, huR_1 = hu_p[:, :-1], hu_p[:, 1:]
+        hvL_1, hvR_1 = hv_p[:, :-1], hv_p[:, 1:]
+        # I2 wet/dry safety (Liang & Borthwick 2009 / Toro 2001 §11):
+        # at any face whose left or right cell is dry, fall back to first
+        # order.  MUSCL gradients and limiters are unreliable on
+        # near-vanishing depths and inject spurious face states that
+        # severely throttle wet/dry mass fluxes.
+        h_p_centered = np.maximum(0.0, eta_p - z_p)
+        dry_face = (h_p_centered[:, :-1] <= _H_DRY) | (h_p_centered[:, 1:] <= _H_DRY)
+        etaL = np.where(dry_face, etaL_1, etaL_2)
+        etaR = np.where(dry_face, etaR_1, etaR_2)
+        zL = np.where(dry_face, zL_1, zL_2)
+        zR = np.where(dry_face, zR_1, zR_2)
+        huL = np.where(dry_face, huL_1, huL_2)
+        huR = np.where(dry_face, huR_1, huR_2)
+        hvL = np.where(dry_face, hvL_1, hvL_2)
+        hvR = np.where(dry_face, hvR_1, hvR_2)
     else:
         etaL, etaR = eta_p[:, :-1], eta_p[:, 1:]
         zL, zR = z_p[:, :-1], z_p[:, 1:]
@@ -283,7 +353,30 @@ def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1, left_wall=False, right_wall=Fa
     Fhu = Fhu.reshape(nr, nc + 1)
     Fhv = Fhv.reshape(nr, nc + 1)
 
-    Sx = 0.5 * g * (hL_s[:, 1:] ** 2 - hR_s[:, :-1] ** 2) / dx
+    # Compatible (well-balanced) bed-slope source.
+    #
+    # The source must be the exact partner of the HLLC hydrostatic pressure
+    # flux so that "lake at rest" on a non-flat bed is preserved to machine
+    # precision, while contributing *nothing* on a flat bed (where there is
+    # no bed slope), regardless of the surface gradient.
+    #
+    # The key requirement (Audusse et al. 2004 §2.2; Liang & Borthwick 2009
+    # "compatible discretization") is that the source be built from the
+    # CELL-CENTERED surface elevation referenced to the same raised-bed face
+    # step `zf = max(zL, zR)` that the flux uses — NOT from the MUSCL-
+    # reconstructed face values.  Using reconstructed eta here couples the
+    # well-balancing to the slope limiter and injects spurious momentum on a
+    # flat bed whenever the surface varies (the order-2 defect this replaces).
+    #
+    # At rest (eta = const) hLsrc = hRsrc = eta - zf at every face, so the
+    # source telescopes exactly against div(F_hu); on a flat bed zf = 0 makes
+    # hLsrc/hRsrc equal the cell-centered depths and the source vanishes.
+    eta_cell_L = eta_p[:, :-1]
+    eta_cell_R = eta_p[:, 1:]
+    zf_face = np.maximum(zL, zR)
+    hLsrc = np.maximum(0.0, eta_cell_L - zf_face)
+    hRsrc = np.maximum(0.0, eta_cell_R - zf_face)
+    Sx = 0.5 * g * (hLsrc[:, 1:] ** 2 - hRsrc[:, :-1] ** 2) / dx
     return (
         h - dt / dx * (Fh[:, 1:] - Fh[:, :-1]),
         hu - dt / dx * (Fhu[:, 1:] - Fhu[:, :-1]) + dt * Sx,
