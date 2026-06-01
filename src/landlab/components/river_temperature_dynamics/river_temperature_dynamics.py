@@ -14,7 +14,7 @@ Key physics
 Governing equation (2D depth-averaged):
 
 dT/dt + u * dT/dx + v * dT/dy = d/dx(D_L * dT/dx) + d/dy(D_T * dT/dy)
-                                     + Phi_net / (rho * c_p * h)
++ Phi_net / (rho * c_p * h)
 
 where Phi_net is the sum of shortwave, longwave, evaporative, convective,
 bed conduction, and groundwater heat fluxes at the water surface, and D_L,
@@ -63,7 +63,7 @@ Initialize water temperature with a warm inflow at the left edge.
 Instantiate and run for 10 minutes with 60 s steps.
 
 >>> rtd = RiverTemperatureDynamics(grid, shade_factor=0.3)
->>> dt = 60.0`
+>>> dt = 60.0
 >>> for _ in range(10):
 ...     rtd.run_one_step(dt)
 ...     grid.at_node["surface_water__temperature"][left_edge] = 20.0
@@ -106,23 +106,32 @@ class RiverTemperatureDynamics(Component):
     rho : float, optional
         Water density [kg/m^3]. Used as a constant when
         ``variable_water_properties=False`` (default). Default = 1000.0
-variable_water_properties : bool, optional
+    variable_water_properties : bool, optional
         If ``True``, water density and dynamic viscosity are recomputed
         each timestep from the local temperature field using the
-        Heggen (1983) empirical equations:
+        Heggen (1983) empirical equations::
 
-        .. math::
-
-            \\rho = 1000 \\left(1 - 1.9549 \\times 10^{-5}
-            |T - 4|^{1.68}\\right)
-
-        .. math::
-
-            \\mu = \\left(0.20319 + 1.5883\\,e^{-T^{0.9}/22}
-            \\right) \\times 10^{-3}
+          rho = 1000 * (1 - 1.9549e-5 * abs(T - 4)**1.68)
+          mu  = (0.20319 + 1.5883 * exp(-T**0.9 / 22.0)) * 1e-3
 
         Both ``self._rho`` and ``self._mu`` become node-arrays when
         this option is active. Default = False
+    heat_exchange : bool, optional
+        If ``True`` (default), the full atmospheric, bed-conduction, and
+        groundwater heat budget is applied each timestep via
+        ``atmospheric_net_heat_exchange``.  If ``False``, only advection,
+        dispersion, and outlet boundary conditions are applied; all
+        surface/bed/groundwater fluxes are bypassed and the diagnostic
+        arrays (``Q_sw_net``, ``Q_lw_in``, etc.) remain at zero.  This
+        mode is useful for passive-tracer transport tests, code validation,
+        and cases where thermal forcing data are unavailable.  When
+        ``heat_exchange=False`` the five atmospheric forcing fields
+        (``air__temperature``, ``air__relative_humidity``,
+        ``air__velocity``, ``radiation__incoming_shortwave_flux``,
+        ``solar__altitude_angle``) are created automatically as zero-filled
+        node fields so that Landlab's ``Component`` field-validation step
+        is satisfied without requiring the user to supply them.
+        Default = True
     cp : float, optional
         Specific heat capacity of water. Default = 4186 J/(kg*C)
     shade_factor : float, optional
@@ -132,16 +141,16 @@ variable_water_properties : bool, optional
         Wind measurement height above the water surface [m].
         Default: 2.0
     rug_terreno : float, optional
-        Aerodynamic roughness length for the wind height log-law correction [m].
-        Default: 0.01
+        Aerodynamic roughness length for the wind height log-law
+        correction [m]. Default: 0.01
     wind_adj : float, optional
         Empirical multiplier applied to evaporative and convective fluxes.
         Default: 1.0 (no adjustment).
     h_min : float, optional
-        Minimum depth used to prevent division by zero in the heat budget [m].
-        Default: 0.01
+        Minimum depth used to prevent division by zero in the heat budget
+        [m]. Default: 0.01
     sigma_lw_factor : float, optional
-        Correction factor of longwave radiationt. Default: 1.0
+        Correction factor of longwave radiation. Default: 1.0
     alpha_L : float, optional
         Longitudinal dispersion scaling coefficient. Default: 10.0
     alpha_T : float, optional
@@ -157,16 +166,19 @@ variable_water_properties : bool, optional
     met_file : str or None, optional
         Path to a CSV file containing meteorological time-series data.
         Expected columns: 'time_sec', 'T_air', 'RH', 'u_wind', 'Q_sw',
-        'cloud_cover'. If provided, the component will interpolate and update
-        these fields automatically during `run_one_step`. Default: None
+        'cloud_cover'. If provided, the component will interpolate and
+        update these fields automatically during ``run_one_step``.
+        Default: None
     dz_bed : float, optional
-        Thickness of the active sediment layer for bed conduction [m]. Default: 0.5
+        Thickness of the active sediment layer for bed conduction [m].
+        Default: 0.5
     k_bed : float, optional
         Thermal conductivity of the sediment bed [W/(m*C)]. Default: 1.5
     rho_bed : float, optional
         Density of the sediment bed [kg/m^3]. Default: 1500.0
     cp_bed : float, optional
-        Specific heat capacity of the sediment bed [J/(kg*C)]. Default: 800.0
+        Specific heat capacity of the sediment bed [J/(kg*C)].
+        Default: 800.0
     """
 
     _name = "RiverTemperatureDynamics"
@@ -280,11 +292,26 @@ variable_water_properties : bool, optional
         },
     }
 
+    # ------------------------------------------------------------------
+    # Fields that are only consumed by atmospheric_net_heat_exchange.
+    # When heat_exchange=False these are pre-created as zeros so that
+    # Landlab's Component field-validation (inside super().__init__)
+    # does not raise a missing-field error.
+    # ------------------------------------------------------------------
+    _ATMOS_FORCING_FIELDS = {
+        "air__temperature":                 "deg C",
+        "air__relative_humidity":           "%",
+        "air__velocity":                    "m/s",
+        "radiation__incoming_shortwave_flux": "W/m^2",
+        "solar__altitude_angle":            "rad",
+    }
+
     def __init__(
         self,
         grid,
         rho=1000.0,
         variable_water_properties=False,
+        heat_exchange=True,
         cp=4186.0,
         shade_factor=0.2,
         h_ws=2.0,
@@ -303,6 +330,18 @@ variable_water_properties : bool, optional
         rho_bed=1500.0,
         cp_bed=800.0,
     ):
+        # Store flag before super().__init__ so the pre-creation block
+        # below can reference it cleanly.
+        self._heat_exchange = heat_exchange
+
+        # When heat exchange is disabled, pre-populate the required
+        # atmospheric forcing fields as zeros so that Component.__init__
+        # field validation passes without forcing the user to supply them.
+        if not heat_exchange:
+            for field_name, units in self._ATMOS_FORCING_FIELDS.items():
+                if field_name not in grid.at_node:
+                    grid.add_zeros(field_name, at="node", units=units)
+
         super().__init__(grid)
 
         # Physical parameters
@@ -313,9 +352,9 @@ variable_water_properties : bool, optional
         self._rho_ref = rho
         self._rho = rho  # scalar fallback; overwritten per-step when variable
         self._cp = cp
-        # Dynamic viscosity [Pa s] — constant default, overwritten per-step
+        # Dynamic viscosity [Pa s] -- constant default, overwritten per-step
         # when variable_water_properties is True.
-        self._mu = 1.002e-3  # ~20 °C reference value
+        self._mu = 1.002e-3  # ~20 deg C reference value
         self._shade_factor = shade_factor
         self._h_ws = h_ws
         self._rug_terreno = rug_terreno
@@ -342,6 +381,7 @@ variable_water_properties : bool, optional
                 f"outlet_boundary_condition must be one of {valid_bcs}, "
                 f"got {outlet_boundary_condition}"
             )
+
         self._outlet_bc = outlet_boundary_condition
         self._fixed_outlet_temperature = fixed_outlet_temperature
 
@@ -367,14 +407,14 @@ variable_water_properties : bool, optional
         self._Q_sw_inc = self._grid.at_node["radiation__incoming_shortwave_flux"]
         self._alt_rad = self._grid.at_node["solar__altitude_angle"]
 
-        # New mapping fields for upgraded physics
+        # Optional / upgraded physics fields
         self._C_cloud = self._grid.at_node["cloud_cover__fraction"]
         # Specific discharge of groundwater into the channel (positive = gaining)
         self._q_gw = self._grid.at_node["groundwater__specific_discharge"]
         self._T_gw = self._grid.at_node["groundwater__temperature"]
         self._T_bed = self._grid.at_node["sediment__temperature"]
 
-        # Diagnostic flux fields
+        # Diagnostic flux fields (remain zero when heat_exchange=False)
         self.Q_sw_net = np.zeros(grid.number_of_nodes)
         self.Q_lw_in = np.zeros(grid.number_of_nodes)
         self.Q_lw_reflected = np.zeros(grid.number_of_nodes)
@@ -392,6 +432,22 @@ variable_water_properties : bool, optional
 
         # Setup meteorological time-series if provided
         self._setup_meteorology(met_file)
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def heat_exchange(self):
+        """bool : Whether atmospheric/bed/GW heat exchange is active."""
+        return self._heat_exchange
+
+    @heat_exchange.setter
+    def heat_exchange(self, value):
+        """Toggle heat exchange on or off at runtime."""
+        if not isinstance(value, bool):
+            raise TypeError("heat_exchange must be a bool")
+        self._heat_exchange = value
 
     @property
     def input_var_names(self):
@@ -411,6 +467,10 @@ variable_water_properties : bool, optional
             if meta["intent"] in ("out", "inout")
         )
 
+    # ------------------------------------------------------------------
+    # Meteorology helpers
+    # ------------------------------------------------------------------
+
     def _setup_meteorology(self, met_file):
         """Reads a CSV file and creates interpolation functions for forcing data."""
         if met_file is None:
@@ -423,7 +483,9 @@ variable_water_properties : bool, optional
         self._interp_Ta = interp1d(
             df["time_sec"], df["T_air"], fill_value="extrapolate"
         )
-        self._interp_RH = interp1d(df["time_sec"], df["RH"], fill_value="extrapolate")
+        self._interp_RH = interp1d(
+            df["time_sec"], df["RH"], fill_value="extrapolate"
+        )
         self._interp_wind = interp1d(
             df["time_sec"], df["u_wind"], fill_value="extrapolate"
         )
@@ -448,6 +510,10 @@ variable_water_properties : bool, optional
         self._v_wind[:] = self._interp_wind(t_sim)
         self._Q_sw_inc[:] = self._interp_Qsw(t_sim)
         self._C_cloud[:] = self._interp_cloud(t_sim)
+
+    # ------------------------------------------------------------------
+    # Thermodynamic utility methods
+    # ------------------------------------------------------------------
 
     @staticmethod
     def _vapor_pressure_mmHg(T):
@@ -486,31 +552,16 @@ variable_water_properties : bool, optional
             T > 35,
         ]
         a1 = [
-            610.483,
-            610.483,
-            516.891,
-            273.444,
-            -193.717,
-            -979.786,
-            -2211.018,
-            -4037.268,
-            -6648.520,
+            610.483, 610.483, 516.891, 273.444, -193.717,
+            -979.786, -2211.018, -4037.268, -6648.520,
         ]
         b1 = [
-            37.7569,
-            52.3690,
-            71.0875,
-            95.4322,
-            126.5763,
-            165.8797,
-            215.1290,
-            276.0040,
-            350.6112,
+            37.7569, 52.3690, 71.0875, 95.4322, 126.5763,
+            165.8797, 215.1290, 276.0040, 350.6112,
         ]
         a_sel = np.select(conditions, a1, default=a1[-1])
         b_sel = np.select(conditions, b1, default=b1[-1])
         return (a_sel + T * b_sel) * 0.01
-
 
     @staticmethod
     def _rho_heggen(T):
@@ -558,11 +609,15 @@ variable_water_properties : bool, optional
         """
         if self._variable_water_properties:
             self._rho = self._rho_heggen(self._T)
-            self._mu  = self._mu_heggen(self._T)
+            self._mu = self._mu_heggen(self._T)
+
+    # ------------------------------------------------------------------
+    # Core physics methods
+    # ------------------------------------------------------------------
 
     def atmospheric_net_heat_exchange(self, dt):
         """Calculate the net heat flux (including bed and GW) and update temperature."""
-        self._update_water_properties()
+        
         T = self._T
         Ta = self._T_air
         RH = self._RH
@@ -592,12 +647,10 @@ variable_water_properties : bool, optional
         )
         Q_sw_net = (Q_sw_inc - refl * Q_sw_inc / 100.0) * (1.0 - self._shade_factor)
 
-        # 2. Atmospheric longwave incoming (with Cloud Correction)
+        # 2. Atmospheric longwave incoming (with cloud correction)
         e_sat_air_mmHg = self._vapor_pressure_mmHg(Ta)
         e_air_mmHg = e_sat_air_mmHg * RH / 100.0
         eps_a = 0.7 + 0.031 * np.sqrt(e_air_mmHg)
-
-        # Apply cloud cover adjustment (1 + 0.17 * C^2)
         cloud_factor = 1.0 + 0.17 * (C_cloud**2)
         Q_lw_in = self._sigma_lw_factor * (
             eps_a * self._sigma * (Ta + 273.15) ** 4 * cloud_factor
@@ -628,10 +681,10 @@ variable_water_properties : bool, optional
         CBowen = 0.61
         Q_conv = self._rho * LW * f_w * CBowen * (T - Ta)
 
-        # 8. Bed Heat Conduction
+        # 8. Bed heat conduction
         Q_bed = (self._k_bed / (0.5 * self._dz_bed)) * (self._T_bed - T)
 
-        # 9. Groundwater / Hyporheic Exchange
+        # 9. Groundwater / hyporheic exchange
         Q_gw = self._rho * self._cp * self._q_gw * (self._T_gw - T)
 
         # 10. Net balance
@@ -646,7 +699,6 @@ variable_water_properties : bool, optional
         )
 
         # 11. Apply temperature changes
-        # Update water temperature
         self._T += Q_net * dt / (h * self._cp * self._rho)
 
         # Update active sediment layer temperature
@@ -680,7 +732,9 @@ variable_water_properties : bool, optional
             * u_star[grid.horizontal_links]
         )
         D_link[grid.vertical_links] = (
-            self._alpha_T * h_link[grid.vertical_links] * u_star[grid.vertical_links]
+            self._alpha_T
+            * h_link[grid.vertical_links]
+            * u_star[grid.vertical_links]
         )
 
         grad_T = grid.calc_grad_at_link("surface_water__temperature")
@@ -704,6 +758,10 @@ variable_water_properties : bool, optional
             if self._fixed_outlet_temperature is not None:
                 T[self._outlet_nodes] = self._fixed_outlet_temperature
 
+    # ------------------------------------------------------------------
+    # Main time-stepping method
+    # ------------------------------------------------------------------
+
     def run_one_step(self, dt, t_sim=None):
         """Advance the temperature field by one time step *dt* [s].
 
@@ -714,10 +772,23 @@ variable_water_properties : bool, optional
         t_sim : float, optional
             Current simulation time [s]. Used to update meteorological
             boundary conditions if a met_file was provided.
+
+        Notes
+        -----
+        When ``heat_exchange=False``, only advection, dispersion, and
+        outlet boundary conditions are applied.  All surface/bed/groundwater
+        heat fluxes are skipped and the diagnostic arrays (``Q_sw_net``,
+        ``Q_lw_in``, etc.) remain at zero.  This mode is equivalent to
+        treating temperature as a passive scalar.
         """
         if t_sim is not None:
             self.update_meteorology(t_sim)
-
+            
+        self._update_water_properties()
+        
         self.temperature_advection_dispersion(dt)
-        self.atmospheric_net_heat_exchange(dt)
+
+        if self._heat_exchange:
+            self.atmospheric_net_heat_exchange(dt)
+
         self._apply_outlet_boundary_conditions()

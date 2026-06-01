@@ -92,91 +92,83 @@ class ShearStressCalculator:
     cases identically without conditional logic or data copies.
     """
 
-    def __init__(self, use_hydraulics_radius: bool = False) -> None:
+    def __init__(self, use_hydraulics_radius: bool = False, formulation: str = "boussinesq", mannings_n: float | None = None) -> None:
         """Initialise the shear stress calculator.
 
         Parameters
         ----------
         use_hydraulics_radius : bool, optional
-            When ``True``, compute shear stress as ``τ = ρ g R_h sf`` using
-            the hydraulic radius ``R_h = A / P`` (cross-sectional area over
-            wetted perimeter).  When ``False`` (default), use the simpler
-            depth-slope product ``τ = ρ g h sf``.  The hydraulic-radius
-            formulation is more accurate for wide channels where the aspect
-            ratio is not very large.
+            When ``True``, compute shear stress using hydraulic radius.
+        formulation : str, optional
+            "boussinesq" (default) uses the full unsteady energy equation.
+            "velocity_driven" uses pure velocity-driven friction.
+        mannings_n : float, optional
+            Required if formulation="velocity_driven".
         """
         self._use_hydraulics_radius = use_hydraulics_radius
+        self._formulation = formulation
+        self._mannings_n = mannings_n
+
+        if self._formulation == "velocity_driven" and self._mannings_n is None:
+            raise ValueError("mannings_n must be provided when using the 'velocity_driven' formulation.")
 
     def calculate(self, rbd) -> None:
-        """Compute shear stress at every link and store results on *rbd*.
-
-        Reads all required fields from the ``RiverBedDynamics`` instance
-        ``rbd`` and writes back ``_dz_ds``, ``_u``, ``_shear_stress``, and
-        ``_surface_water__shear_stress_link``.
-
-        The wetting-drying depth cutoff is **not** applied here; it is
-        applied by ``RiverBedDynamics.shear_stress()`` immediately after
-        this call returns.
-
-        Parameters
-        ----------
-        rbd : RiverBedDynamics
-            The component instance.  Must have completed ``__init__`` and
-            ``cache_topology()`` so all required private attributes exist.
-        """
-        g = rbd._grid  # Landlab RasterModelGrid
+        g = rbd._grid
 
         # ── S₀ = −∂z/∂s ──────────────────────────────────────────────────
+        # Always computed: required by downstream bedload equations for local slope corrections.
         z = g.at_node["topographic__elevation"]
         rbd._dz_ds = -g.calc_grad_at_link(z)
 
-        # ── ∂h/∂s ─────────────────────────────────────────────────────────
-        h = g["node"]["surface_water__depth"]
-        dh_ds = g.calc_grad_at_link(h)
-        h_links = g.at_link["surface_water__depth"]
-
-        # ── ∂U/∂s — velocity gradient at links ────────────────────────────
         rbd._u = g["link"]["surface_water__velocity"]
-        du_ds = rbd._topo_du_ds_scratch
-        du_ds[:] = 0.0  # reset pre-allocated scratch array (avoids malloc)
-
-        # Horizontal links
-        u_nodes_h = g.map_mean_of_horizontal_links_to_node(rbd._u)
-        hl = rbd._topo_horizontal_links
-        du_ds[hl] = g.calc_grad_at_link(u_nodes_h)[hl]
-
-        # Vertical links — reshape, reverse row order, finite-difference, restore
-        u_nodes_v = g.map_mean_of_vertical_links_to_node(rbd._u)
-        u_nodes_v = u_nodes_v.reshape(g._shape[0], g._shape[1])[::-1, :]
-        du_ds_v = -np.diff(u_nodes_v, axis=0) / g.dy
-        vl = rbd._topo_vertical_links
-        du_ds[vl] = np.flip(du_ds_v.T, axis=1).flatten(order="F")
-
-        # ── ∂U/∂t — temporal velocity gradient ────────────────────────────
-        u_prev = rbd._surface_water__velocity_prev_time_link
-        du_dt = (rbd._u - u_prev) / g._dt
-
-        # ── Friction slope sf ──────────────────────────────────────────────
-        sf = rbd._dz_ds - dh_ds - (rbd._u / rbd._g) * du_ds - du_dt / rbd._g
-
-        # ── Per-link density (scalar or ndarray) ───────────────────────────
-        # np.broadcast_to works for both scalar rho (default) and per-link
-        # ndarray rho (variable_fluid_properties=True).  Returns a read-only
-        # view with no copy; arithmetic below allocates the output array.
+        h_links = g.at_link["surface_water__depth"]
         rho = np.broadcast_to(np.asarray(rbd._rho, dtype=float), h_links.shape)
 
-        # ── Shear stress ───────────────────────────────────────────────────
-        if self._use_hydraulics_radius:
-            area = rbd._scratch_area        # pre-allocated; shape (n_links,)
-            perimeter = rbd._scratch_perimeter
-            area[hl] = h_links[hl] * g.dx
-            area[vl] = h_links[vl] * g.dy
-            perimeter[hl] = g.dx + 2.0 * h_links[hl]
-            perimeter[vl] = g.dy + 2.0 * h_links[vl]
-            rh = area / perimeter
-            rbd._shear_stress = rho * rbd._g * rh * sf
+        if self._formulation == "velocity_driven":
+
+            h_safe = np.maximum(h_links, 1e-6)
+            tau_mag = rho * rbd._g * (self._mannings_n**2) * (rbd._u**2) / (h_safe**(1.0/3.0))
+            
+            # Direction strictly follows the water velocity vector
+            rbd._shear_stress = tau_mag * np.sign(rbd._u)
+
         else:
-            rbd._shear_stress = rho * rbd._g * h_links * sf
+            # ── Original Unsteady Boussinesq Formulation ───────────────────
+            h = g["node"]["surface_water__depth"]
+            dh_ds = g.calc_grad_at_link(h)
+
+            # ∂U/∂s — velocity gradient at links
+            du_ds = rbd._topo_du_ds_scratch
+            du_ds[:] = 0.0  
+            
+            u_nodes_h = g.map_mean_of_horizontal_links_to_node(rbd._u)
+            hl = rbd._topo_horizontal_links
+            du_ds[hl] = g.calc_grad_at_link(u_nodes_h)[hl]
+
+            u_nodes_v = g.map_mean_of_vertical_links_to_node(rbd._u)
+            u_nodes_v = u_nodes_v.reshape(g._shape[0], g._shape[1])[::-1, :]
+            du_ds_v = -np.diff(u_nodes_v, axis=0) / g.dy
+            vl = rbd._topo_vertical_links
+            du_ds[vl] = np.flip(du_ds_v.T, axis=1).flatten(order="F")
+
+            # ∂U/∂t — temporal velocity gradient
+            u_prev = rbd._surface_water__velocity_prev_time_link
+            du_dt = (rbd._u - u_prev) / g._dt
+
+            # Friction slope sf
+            sf = rbd._dz_ds - dh_ds - (rbd._u / rbd._g) * du_ds - du_dt / rbd._g
+
+            if self._use_hydraulics_radius:
+                area = rbd._scratch_area        
+                perimeter = rbd._scratch_perimeter
+                area[hl] = h_links[hl] * g.dx
+                area[vl] = h_links[vl] * g.dy
+                perimeter[hl] = g.dx + 2.0 * h_links[hl]
+                perimeter[vl] = g.dy + 2.0 * h_links[vl]
+                rh = area / perimeter
+                rbd._shear_stress = rho * rbd._g * rh * sf
+            else:
+                rbd._shear_stress = rho * rbd._g * h_links * sf
 
         # ── Zero shear stress at boundary links ────────────────────────────
         rbd._shear_stress[rbd._boundary_links] = 0.0

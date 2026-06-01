@@ -802,6 +802,8 @@ class RiverBedDynamics(Component):
         rho=1000,
         rho_s=2650,
         bedload_equation="MPM",
+        shear_stress_formulation="boussinesq",
+        mannings_n=None,
         variable_critical_shear_stress=False,
         use_hydraulics_radius_in_shear_stress=False,
         lambda_p=0.35,
@@ -1088,7 +1090,9 @@ class RiverBedDynamics(Component):
             )
         self._bedload_eq = EQUATION_REGISTRY[bedload_equation]()
         self._shear_calc = ShearStressCalculator(
-            use_hydraulics_radius=use_hydraulics_radius_in_shear_stress
+            use_hydraulics_radius=use_hydraulics_radius_in_shear_stress,
+            formulation=shear_stress_formulation,
+            mannings_n=mannings_n
         )
         self._gsd_evolver = ToroEscobarEvolver(
             gsd_advection_scheme=gsd_advection_scheme
