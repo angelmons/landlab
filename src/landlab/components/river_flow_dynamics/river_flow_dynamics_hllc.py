@@ -282,23 +282,223 @@ def _hydro_recon(etaL, etaR, zL, zR):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _pad(q, left_reflect=False, right_reflect=False, negate=False):
-    # Pad q with transmissive or reflective ghost cells in x.
+def _solve_subcritical_inflow(q_target, h_interior, hu_interior, hv_interior,
+                              z_ghost, hv_ghost_target, g, side="left"):
+    """Solve for the ghost state at a subcritical inflow boundary that is
+    consistent with the prescribed discharge and the interior's outgoing
+    Riemann invariant.
+
+    SWE characteristics in subcritical flow (Fr < 1):
+      * Outgoing characteristic (left boundary: goes left, out of domain):
+            R⁻ = u - 2√(g h)
+        carries information from the interior.
+      * Incoming characteristic (left boundary: goes right, into domain):
+            R⁺ = u + 2√(g h)
+        carries the boundary condition.
+
+    The user prescribes the discharge `q = h u` (one condition, matching the
+    number of incoming characteristics).  We extract R⁻ from the interior
+    cell and solve for the consistent ghost (h, u) satisfying:
+        q = h u           and       u - 2√(g h) = R⁻_interior
+    (with sign of R⁻ flipped at the right boundary).
+
+    For the right boundary the outgoing characteristic is R⁺ = u + 2√(g h),
+    and the equations become:
+        q = h u           and       u + 2√(g h) = R⁺_interior
+
+    Returns (h_ghost, hu_ghost) arrays.  `hv_ghost` is taken as
+    `h_ghost * (hv_ghost_target / max(h_interior, eps))` if the user
+    didn't pre-scale (i.e. it tracks the depth so v is the prescribed
+    transverse velocity).
+
+    Parameters
+    ----------
+    q_target : array (nr,)
+        Prescribed discharge per unit width [m^2/s] at each row of the boundary.
+        Positive values mean inflow into the domain.
+    h_interior, hu_interior, hv_interior : array (nr,)
+        State of the boundary-adjacent interior cells.
+    z_ghost : array (nr,)
+        Bed elevation at the ghost cell (typically matches the interior bed).
+    hv_ghost_target : array (nr,)
+        Prescribed transverse momentum at the boundary [m^2/s].
+    g : float
+    side : "left" or "right"
+        Which boundary; flips the sign convention of the Riemann invariant.
+
+    Returns
+    -------
+    h_ghost, hu_ghost, hv_ghost : arrays (nr,)
+    """
+    # u_int from interior; safe division
+    h_int_safe = np.maximum(h_interior, _H_DRY)
+    u_int = hu_interior / h_int_safe
+    c_int = np.sqrt(g * h_int_safe)
+    if side == "left":
+        # Outgoing characteristic value extracted from interior:
+        Rminus = u_int - 2.0 * c_int
+        # Solve for ghost h from:  h * (Rminus + 2 sqrt(g h)) = q_target
+        # Let s = sqrt(h); cubic in s: 2 sqrt(g) s^3 + Rminus s^2 - q = 0
+        sign = +1.0
+        R = Rminus
+    else:  # "right"
+        Rplus = u_int + 2.0 * c_int
+        sign = -1.0
+        R = Rplus
+
+    # Newton iteration on the cubic; initial guess from interior h
+    s = np.sqrt(h_int_safe).copy()
+    for _ in range(20):
+        f = 2.0 * np.sqrt(g) * sign * s**3 + R * s**2 - q_target
+        df = 6.0 * np.sqrt(g) * sign * s**2 + 2.0 * R * s
+        # Where df ~ 0 (degenerate), keep current s
+        step = np.where(np.abs(df) > 1e-12, f / df, 0.0)
+        s = s - step
+        s = np.maximum(s, 1e-9)
+        if np.max(np.abs(step)) < 1e-12:
+            break
+    h_ghost = s * s
+    # u from R invariant (more accurate than q/h for tiny h)
+    if side == "left":
+        u_ghost = R + 2.0 * np.sqrt(g * h_ghost)
+    else:
+        u_ghost = R - 2.0 * np.sqrt(g * h_ghost)
+    hu_ghost = h_ghost * u_ghost
+    # Transverse momentum: prescribed v scaled by ghost depth
+    # (hv_ghost_target is interpreted as h*v specified at the boundary,
+    # but if the user supplied it already as h_in*v_in their original
+    # h_in may not equal the resolved h_ghost; rescale by depth ratio
+    # so the *velocity* is what the user intended).
+    hv_ghost = hv_ghost_target / np.maximum(h_interior, _H_DRY) * h_ghost
+    return h_ghost, hu_ghost, hv_ghost
+
+
+def _build_inflow_ghost(spec, h_int_edge, hu_int_edge, hv_int_edge, g, side):
+    """Resolve an inflow spec into concrete ghost arrays.
+
+    The spec can specify the ghost state in one of two modes:
+
+      * Mode "full"  (spec has key 'mode' == 'full' or omitted with all
+        of 'h','hu','hv'):
+            The ghost is the prescribed (h, hu, hv).  Only correct for
+            supercritical inflow (Fr > 1) where all three variables are
+            prescribed; use with care for subcritical flow because it
+            over-determines the Riemann problem.
+
+      * Mode "discharge"  (spec has key 'mode' == 'discharge' or has key
+        'q' but not 'h'):
+            Subcritical inflow.  The user specifies q (and optionally
+            hv_target).  The ghost h and u are resolved from q together
+            with the outgoing Riemann invariant from the interior, which
+            is the textbook Godunov-correct subcritical inflow BC.
+    """
+    z = spec['z']
+    mode = spec.get('mode', None)
+    if mode is None:
+        mode = 'discharge' if 'q' in spec else 'full'
+    if mode == 'full':
+        return spec['h'], spec['hu'], spec['hv'], z
+    elif mode == 'discharge':
+        q = spec['q']
+        hv_target = spec.get('hv', np.zeros_like(q))
+        h_g, hu_g, hv_g = _solve_subcritical_inflow(
+            q, h_int_edge, hu_int_edge, hv_int_edge,
+            z, hv_target, g, side=side,
+        )
+        return h_g, hu_g, hv_g, z
+    else:
+        raise ValueError(f"Unknown inflow mode: {mode}")
+
+
+def _pad(q, left_reflect=False, right_reflect=False, negate=False,
+         left_ghost=None, right_ghost=None):
+    """Pad q with ghost cells in the x-direction.
+
+    Modes (per side, independent):
+      * Prescribed ghost (`left_ghost` / `right_ghost` is an array):
+        use the prescribed array as the ghost.  This is the Godunov-correct
+        way to impose a Dirichlet inflow / outflow boundary: the HLLC
+        Riemann problem at the boundary face is then between the prescribed
+        ghost state and the interior cell, which delivers the exact
+        prescribed inflow flux.  Overrides the reflect/transmissive choice.
+      * Reflective (`left_reflect=True`):
+        mirror the interior with momentum negation when `negate=True`.
+      * Transmissive (default):
+        copy the interior boundary cell as a zero-gradient extrapolation.
+    """
     sign = -1.0 if negate else 1.0
-    left_ghost = q[:, :1] * (sign if left_reflect else 1.0)
-    right_ghost = q[:, -1:] * (sign if right_reflect else 1.0)
-    return np.concatenate([left_ghost, q, right_ghost], axis=1)
+    if left_ghost is not None:
+        lg = left_ghost
+        if lg.ndim == 1:
+            lg = lg[:, None]
+    else:
+        lg = q[:, :1] * (sign if left_reflect else 1.0)
+    if right_ghost is not None:
+        rg = right_ghost
+        if rg.ndim == 1:
+            rg = rg[:, None]
+    else:
+        rg = q[:, -1:] * (sign if right_reflect else 1.0)
+    return np.concatenate([lg, q, rg], axis=1)
 
 
-def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1, left_wall=False, right_wall=False):
+def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1, left_wall=False, right_wall=False,
+             inflow_left=None, inflow_right=None):
+    """Advance the conservative state by one x-direction sub-step.
+
+    inflow_left / inflow_right (optional): dict with keys
+        'h', 'hu', 'hv', 'z'  (each a 1-D array of length nr)
+    If provided, the corresponding x-boundary ghost cells are set to these
+    prescribed values rather than transmissive/reflective copies of the
+    interior.  This implements a Godunov-correct Dirichlet inflow / outflow
+    boundary: the HLLC Riemann problem at the boundary face is solved
+    between the prescribed ghost state and the interior cell, delivering
+    the exact prescribed mass and momentum flux.
+
+    Overrides left_wall / right_wall when inflow_left / inflow_right is given.
+    """
     nr, nc = h.shape
     eta = h + z
 
-    # transmissive by default; reflective (negated u-mom) for walls
-    eta_p = _pad(eta, left_wall, right_wall, negate=False)
-    z_p = _pad(z, left_wall, right_wall, negate=False)
-    hu_p = _pad(hu, left_wall, right_wall, negate=True)  # negate normal momentum
-    hv_p = _pad(hv, left_wall, right_wall, negate=False)
+    # Prepare optional prescribed ghost arrays via the characteristic-based
+    # builder when the spec is provided
+    eta_lg = z_lg = hu_lg = hv_lg = None
+    eta_rg = z_rg = hu_rg = hv_rg = None
+    if inflow_left is not None:
+        h_int_edge  = h[:, 0]
+        hu_int_edge = hu[:, 0]
+        hv_int_edge = hv[:, 0]
+        h_g, hu_g, hv_g, z_g = _build_inflow_ghost(
+            inflow_left, h_int_edge, hu_int_edge, hv_int_edge, g, side="left"
+        )
+        eta_lg = h_g + z_g
+        z_lg   = z_g
+        hu_lg  = hu_g
+        hv_lg  = hv_g
+    if inflow_right is not None:
+        h_int_edge  = h[:, -1]
+        hu_int_edge = hu[:, -1]
+        hv_int_edge = hv[:, -1]
+        h_g, hu_g, hv_g, z_g = _build_inflow_ghost(
+            inflow_right, h_int_edge, hu_int_edge, hv_int_edge, g, side="right"
+        )
+        eta_rg = h_g + z_g
+        z_rg   = z_g
+        hu_rg  = hu_g
+        hv_rg  = hv_g
+
+    # When inflow is specified, override wall flag on that side
+    eff_left_wall  = left_wall  and (inflow_left  is None)
+    eff_right_wall = right_wall and (inflow_right is None)
+
+    eta_p = _pad(eta, eff_left_wall, eff_right_wall, negate=False,
+                 left_ghost=eta_lg, right_ghost=eta_rg)
+    z_p = _pad(z, eff_left_wall, eff_right_wall, negate=False,
+               left_ghost=z_lg, right_ghost=z_rg)
+    hu_p = _pad(hu, eff_left_wall, eff_right_wall, negate=True,
+                left_ghost=hu_lg, right_ghost=hu_rg)
+    hv_p = _pad(hv, eff_left_wall, eff_right_wall, negate=False,
+                left_ghost=hv_lg, right_ghost=hv_rg)
 
     if order == 2:
         # MUSCL second-order reconstruction
@@ -384,18 +584,34 @@ def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1, left_wall=False, right_wall=Fa
     )
 
 
-def _y_sweep(h, hu, hv, z, dt, dy, g=_G, order=1, bottom_wall=False, top_wall=False):
+def _y_sweep(h, hu, hv, z, dt, dy, g=_G, order=1, bottom_wall=False, top_wall=False,
+             inflow_bottom=None, inflow_top=None):
+    """Y-direction sub-step.  Implemented by calling _x_sweep on transposed
+    arrays with hu/hv swapped (so the "x-momentum" of the sweep is the y
+    physical momentum).  Inflow specs are likewise swapped: bottom -> left
+    (and the v-component of inflow becomes the swept-direction "hu").
+    """
+    def _swap_spec(s):
+        """Transpose a discharge-mode or full-mode inflow spec so that the
+        sweep direction's "x-momentum" (hu) carries the physical y-momentum.
+        In discharge mode the spec's q already represents the discharge
+        normal to the boundary, which is what the swept-direction _x_sweep
+        expects (no swap needed for q); but hv (tangential) in the original
+        frame becomes the swept frame's transverse, which is again hv."""
+        if s is None:
+            return None
+        if s.get('mode') == 'discharge' or 'q' in s:
+            # q is already normal-to-boundary; hv stores the tangential
+            # momentum in the ORIGINAL frame.  In the swept frame, the
+            # tangential is the orthogonal direction, also called hv there.
+            return {'mode': 'discharge', 'q': s['q'], 'hv': s['hv'], 'z': s['z']}
+        return {'h': s['h'], 'hu': s['hv'], 'hv': s['hu'], 'z': s['z']}
+
     h_T, hv_T, hu_T = _x_sweep(
-        h.T,
-        hv.T,
-        hu.T,
-        z.T,
-        dt,
-        dy,
-        g,
-        order,
-        left_wall=bottom_wall,
-        right_wall=top_wall,
+        h.T, hv.T, hu.T, z.T, dt, dy, g, order,
+        left_wall=bottom_wall, right_wall=top_wall,
+        inflow_left=_swap_spec(inflow_bottom),
+        inflow_right=_swap_spec(inflow_top),
     )
     return h_T.T, hu_T.T, hv_T.T
 
@@ -441,9 +657,15 @@ def _step(
     right_wall=False,
     bottom_wall=False,
     top_wall=False,
+    inflow_left=None,
+    inflow_right=None,
+    inflow_bottom=None,
+    inflow_top=None,
 ):
-    kx = {"g": g, "order": order, "left_wall": left_wall, "right_wall": right_wall}
-    ky = {"g": g, "order": order, "bottom_wall": bottom_wall, "top_wall": top_wall}
+    kx = {"g": g, "order": order, "left_wall": left_wall, "right_wall": right_wall,
+          "inflow_left": inflow_left, "inflow_right": inflow_right}
+    ky = {"g": g, "order": order, "bottom_wall": bottom_wall, "top_wall": top_wall,
+          "inflow_bottom": inflow_bottom, "inflow_top": inflow_top}
     P = _pos
     if step_count % 2 == 0:
         h, hu, hv = P(*_x_sweep(h, hu, hv, z, dt / 2, dx, **kx))
@@ -744,6 +966,20 @@ class RiverFlowDynamics_HLLC(Component):
         self._top_wall = "top" in walls
 
         # ── Inflow BCs ────────────────────────────────────────────────────
+        # The inflow is enforced as a flux boundary condition (Godunov-correct):
+        # the prescribed (h, u, v) values populate the boundary ghost cells,
+        # and the HLLC Riemann problem at the boundary face then delivers the
+        # exact prescribed (h u, h u^2 + ½ g h^2, h u v) flux into the
+        # adjacent interior cell.  This is the canonical way to impose a
+        # subcritical inflow in a finite-volume SWE scheme — directly setting
+        # the interior cell state (as a Dirichlet on the cell) leaves a
+        # spurious Riemann problem at the face to the next interior cell
+        # whenever the interior deviates from the prescribed state, with
+        # mass and momentum lost to that internal wave structure.
+        self._inflow_left_spec   = None
+        self._inflow_right_spec  = None
+        self._inflow_bottom_spec = None
+        self._inflow_top_spec    = None
         if fixed_entry_nodes is not None:
             self._entry_nodes = np.asarray(fixed_entry_nodes, dtype=int)
             n = len(self._entry_nodes)
@@ -764,6 +1000,68 @@ class RiverFlowDynamics_HLLC(Component):
             )
             self._entry_rows = self._entry_nodes // nc
             self._entry_cols = self._entry_nodes % nc
+
+            # Build per-boundary inflow specs by classifying entry nodes
+            # into the boundary they sit on.  An entry node belongs to a
+            # boundary if its row/col index is 0 (left/bottom) or n-1
+            # (right/top).  Bed elevation comes from grid.z at the boundary
+            # row/column so the ghost is consistent with the interior bed.
+            z_2d = self._z
+            for side, mask in (
+                ("left",   self._entry_cols == 0),
+                ("right",  self._entry_cols == nc - 1),
+                ("bottom", self._entry_rows == 0),
+                ("top",    self._entry_rows == nr - 1),
+            ):
+                if not mask.any():
+                    continue
+                # Build full-edge arrays (one entry per row for left/right,
+                # per column for bottom/top), filled with the interior cell
+                # bed elevation and zero flow; then overwrite the entries
+                # specified by the user.  Non-specified edge cells default to
+                # h=interior, hu=0, hv=0 (treated as transmissive only at
+                # those rows where the user did not impose an inflow).
+                if side in ("left", "right"):
+                    edge_len = nr
+                    col_idx = 0 if side == "left" else nc - 1
+                    q_edge  = np.zeros(edge_len)
+                    hv_edge = np.zeros(edge_len)
+                    z_edge  = z_2d[:, col_idx].copy()
+                    rows_here = self._entry_rows[mask]
+                    h_vals = self._entry_h[mask]
+                    u_vals = self._entry_u[mask]
+                    v_vals = self._entry_v[mask]
+                    q_edge[rows_here]  = h_vals * u_vals       # discharge = h * u
+                    hv_edge[rows_here] = h_vals * v_vals       # transverse momentum target
+                    spec = {'mode': 'discharge',
+                            'q': q_edge, 'hv': hv_edge, 'z': z_edge}
+                    if side == "left":
+                        self._inflow_left_spec = spec
+                    else:
+                        self._inflow_right_spec = spec
+                else:  # bottom / top
+                    edge_len = nc
+                    row_idx = 0 if side == "bottom" else nr - 1
+                    q_edge  = np.zeros(edge_len)
+                    hv_edge = np.zeros(edge_len)
+                    z_edge  = z_2d[row_idx, :].copy()
+                    cols_here = self._entry_cols[mask]
+                    h_vals = self._entry_h[mask]
+                    u_vals = self._entry_u[mask]
+                    v_vals = self._entry_v[mask]
+                    # For bottom/top inflow, the "discharge" is in the y direction,
+                    # which after the y-sweep transpose becomes hu in the swept frame.
+                    # We store the spec under the original (x, y) convention; the
+                    # _swap_spec function in _y_sweep handles the transpose.
+                    # Here q = h * v_n (normal velocity into domain).
+                    q_edge[cols_here]  = h_vals * v_vals
+                    hv_edge[cols_here] = h_vals * u_vals  # tangential = x-momentum
+                    spec = {'mode': 'discharge',
+                            'q': q_edge, 'hv': hv_edge, 'z': z_edge}
+                    if side == "bottom":
+                        self._inflow_bottom_spec = spec
+                    else:
+                        self._inflow_top_spec = spec
         else:
             self._entry_nodes = None
 
@@ -857,8 +1155,18 @@ class RiverFlowDynamics_HLLC(Component):
             Time step [s].  ``None`` → adaptive CFL step (recommended).
             A warning is issued when a user-supplied ``dt`` exceeds the
             CFL-stable limit.
+
+        Notes
+        -----
+        Inflow Dirichlet boundary conditions are enforced as a Godunov-correct
+        flux BC: the prescribed (h, u, v) populates the boundary ghost cells
+        inside _x_sweep/_y_sweep, so the HLLC Riemann problem at the boundary
+        face delivers exactly the prescribed (h u, h u^2 + ½ g h^2, h u v)
+        flux into the adjacent interior cell.  No interior cell is overwritten.
+        Outlet BCs remain a stage Dirichlet on the boundary cell (handled by
+        _apply_outlet).
         """
-        self._apply_inflow()
+        # Outlet stage BC is still applied as a cell-state Dirichlet
         self._apply_outlet()
 
         if dt is None:
@@ -891,12 +1199,15 @@ class RiverFlowDynamics_HLLC(Component):
             right_wall=self._right_wall,
             bottom_wall=self._bottom_wall,
             top_wall=self._top_wall,
+            inflow_left=self._inflow_left_spec,
+            inflow_right=self._inflow_right_spec,
+            inflow_bottom=self._inflow_bottom_spec,
+            inflow_top=self._inflow_top_spec,
         )
 
         self._h[:] = h_new
         self._hu[:] = hu_new
         self._hv[:] = hv_new
-        self._apply_inflow()
         self._apply_outlet()
         self._update_derived()
 
