@@ -129,7 +129,7 @@ def strain_functions(phi_sgo):
     range 1: phi_sgo <= 0.7639
 
     >>> phi_sgo = np.array([0.1, 0.2, 0.3, 0.7639])
-    >>> (omega0, sigma0) = Parker1990.strain_functions(phi_sgo)
+    >>> omega0, sigma0 = Parker1990.strain_functions(phi_sgo)
     >>> omega0
     array([1.011, 1.011, 1.011, 1.011])
 
@@ -139,7 +139,7 @@ def strain_functions(phi_sgo):
     range 2: (phi_sgo > 0.7639) & (phi_sgo < 231.2)
 
     >>> phi_sgo = np.array([0.7639, 1, 100, 231.1])
-    >>> (omega0, sigma0) = Parker1990.strain_functions(phi_sgo)
+    >>> omega0, sigma0 = Parker1990.strain_functions(phi_sgo)
     >>> np.round(omega0, 3)
     array([1.011, 1.   , 0.456, 0.454])
 
@@ -149,7 +149,7 @@ def strain_functions(phi_sgo):
     range 3: phi_sgo >= 231.2
 
     >>> phi_sgo = np.array([231.1, 1000, 2000, 2320])
-    >>> (omega0, sigma0) = Parker1990.strain_functions(phi_sgo)
+    >>> omega0, sigma0 = Parker1990.strain_functions(phi_sgo)
     >>> np.round(omega0, 3)
     array([0.454, 0.454, 0.453, 0.453])
 
@@ -243,7 +243,7 @@ def bedload_equation(self):
     shear_stress_star_sg = shear_stress / (rho * R * g * (gs_geom_mean / 1000))
     phi_sgo = shear_stress_star_sg / tau_star_rsgo
 
-    (omega0, sigma0) = strain_functions(phi_sgo)
+    omega0, sigma0 = strain_functions(phi_sgo)
     omega = 1 + (np.log2(gs_geo_std) / sigma0) * (omega0 - 1)
 
     gs_Di_Dsg = np.tile(gs, (self._grid.number_of_links, 1)) / (
@@ -256,17 +256,17 @@ def bedload_equation(self):
     qb_G = np.zeros_like(phi_i)
 
     # There are three intervals where qb_G is evaluated
-    (id0, id1) = np.where(phi_i > 1.59)
+    id0, id1 = np.where(phi_i > 1.59)
     if id0.shape[0] > 0:
         qb_G[id0, id1] = 5474 * (1 - 0.853 / phi_i[id0, id1]) ** 4.5
 
-    (id0, id1) = np.where((phi_i >= 1) & (phi_i <= 1.59))
+    id0, id1 = np.where((phi_i >= 1) & (phi_i <= 1.59))
     if id0.shape[0] > 0:
         qb_G[id0, id1] = np.exp(
             14.2 * (phi_i[id0, id1] - 1) - 9.28 * (phi_i[id0, id1] - 1) ** 2
         )
 
-    (id0, id1) = np.where(phi_i < 1)
+    id0, id1 = np.where(phi_i < 1)
     if id0.shape[0] > 0:
         qb_G[id0, id1] = phi_i[id0, id1] ** 14.2
 

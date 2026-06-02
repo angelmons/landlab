@@ -41,10 +41,10 @@ from __future__ import annotations
 
 import numpy as np
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Density
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def water_density(T: float | np.ndarray) -> float | np.ndarray:
     """Water density as a function of temperature (Heggen 1983).
@@ -89,9 +89,9 @@ def d_rho_dT(T: float | np.ndarray) -> float | np.ndarray:
     --------
     >>> import numpy as np
     >>> from ._fluid_properties import d_rho_dT
-    >>> float(np.round(d_rho_dT(4.0), 6))   # density maximum — slope is zero
+    >>> float(np.round(d_rho_dT(4.0), 6))  # density maximum — slope is zero
     0.0
-    >>> d_rho_dT(20.0) < 0   # density decreases above 4 °C
+    >>> d_rho_dT(20.0) < 0  # density decreases above 4 °C
     True
     """
     T = np.asarray(T, dtype=float)
@@ -109,6 +109,7 @@ def d_rho_dT(T: float | np.ndarray) -> float | np.ndarray:
 # ──────────────────────────────────────────────────────────────────────────────
 # Dynamic viscosity
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def water_viscosity(T: float | np.ndarray) -> float | np.ndarray:
     """Dynamic viscosity of water as a function of temperature (Heggen 1983).
@@ -131,7 +132,7 @@ def water_viscosity(T: float | np.ndarray) -> float | np.ndarray:
     0.001002
     """
     T = np.asarray(T, dtype=float)
-    return (0.20319 + 1.5883 * np.exp(-(T ** 0.9) / 22.0)) * 1e-3
+    return (0.20319 + 1.5883 * np.exp(-(T**0.9) / 22.0)) * 1e-3
 
 
 def d_mu_dT(T: float | np.ndarray) -> float | np.ndarray:
@@ -151,16 +152,17 @@ def d_mu_dT(T: float | np.ndarray) -> float | np.ndarray:
     --------
     >>> import numpy as np
     >>> from ._fluid_properties import d_mu_dT
-    >>> d_mu_dT(20.0) < 0   # viscosity decreases with temperature
+    >>> d_mu_dT(20.0) < 0  # viscosity decreases with temperature
     True
     """
     T = np.asarray(T, dtype=float)
-    return -6.4979e-5 * np.exp(-(T ** 0.9) / 22.0) * T ** (-0.1)
+    return -6.4979e-5 * np.exp(-(T**0.9) / 22.0) * T ** (-0.1)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Particle Reynolds number and derived quantities
 # ──────────────────────────────────────────────────────────────────────────────
+
 
 def particle_reynolds(
     u_star: float | np.ndarray,
@@ -223,10 +225,11 @@ def viscous_sublayer_thickness(
 # Critical Shields stress (Paphitis 2001) — temperature-aware
 # ──────────────────────────────────────────────────────────────────────────────
 
+
 def _B_s(Re_s: np.ndarray) -> np.ndarray:
     """Log-layer intercept B_s (Eq. 3 in Link et al. 2019)."""
     ln_Re = np.log(Re_s)
-    return 8.5 + (2.5 * ln_Re - 3.0) * np.exp(-0.127 * ln_Re ** 2)
+    return 8.5 + (2.5 * ln_Re - 3.0) * np.exp(-0.127 * ln_Re**2)
 
 
 def paphitis_tau_cr_star(Re_s: np.ndarray) -> np.ndarray:

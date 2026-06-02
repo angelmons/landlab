@@ -40,7 +40,7 @@ def vector_mapper(grid, vector):
     >>> u[19] = -0.02
     >>> u[15] = -0.01
 
-    >>> (u_vector, u_magnitude) = utilities.vector_mapper(grid, u)
+    >>> u_vector, u_magnitude = utilities.vector_mapper(grid, u)
     >>> u_x = u_vector[:, 0]
     >>> u_x.reshape(grid.shape)
     array([[ 0.  ,  0.  ,  0.  ,  0.  ,  0.  ],

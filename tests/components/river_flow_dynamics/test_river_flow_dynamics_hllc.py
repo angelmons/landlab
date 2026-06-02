@@ -29,6 +29,8 @@ import pytest
 from landlab import RasterModelGrid
 from landlab.components import RiverFlowDynamics_HLLC
 
+G = 9.81
+
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
@@ -588,7 +590,7 @@ def test_numerical_stability_no_nan_inf_and_nonnegative_depth(dt):
 
 
 # -----------------------------------------------------------------------------
-# Improving coverage
+# Others
 # -----------------------------------------------------------------------------
 
 
@@ -613,3 +615,149 @@ def test_exit_nodes_with_imposed_velocities():
     grid = _make_grid(5, 5, dx=1.0)
     grid.add_zeros("topographic__elevation", at="node")
     grid.add_full("surface_water__depth", 1.0, at="node")
+
+
+# -----------------------------------------------------------------------------
+# Well-Balancing & Compatible-Source Tests
+# -----------------------------------------------------------------------------
+
+
+def _max_speed(grid: RasterModelGrid) -> float:
+    """Helper to compute maximum velocity magnitude in the grid."""
+    u = grid.at_node["surface_water__x_velocity"]
+    v = grid.at_node["surface_water__y_velocity"]
+    return float(np.max(np.sqrt(u**2 + v**2)))
+
+
+@pytest.mark.parametrize("order", [1, 2])
+def test_wb1_flat_flow(order):
+    """
+    WB1: Flat bed with flow. The bed-slope source must be IDENTICALLY zero,
+    regardless of the surface gradient or velocity field.
+    """
+    # Import the internal kernel module to probe _x_sweep directly
+    from landlab.components.river_flow_dynamics import river_flow_dynamics_hllc as K
+
+    nr, nc = 5, 60
+    dx = 1.0
+
+    h = np.full((nr, nc), 0.8)
+    hu = np.full((nr, nc), 0.8 * 0.5)  # u = 0.5 everywhere
+    hv = np.zeros((nr, nc))
+    z = np.zeros((nr, nc))
+
+    # One x-sweep; with a correct flat-bed source, hu is unchanged to machine
+    # precision (flux divergence zero + source zero).
+    _, hu2, _ = K._x_sweep(
+        h.copy(), hu.copy(), hv.copy(), z, dt=0.01, dx=dx, g=K._G, order=order
+    )
+
+    # Interior cells only
+    dhu = np.max(np.abs(hu2[:, 1:-1] - hu[:, 1:-1]))
+
+    # Second probe: a non-trivial surface gradient on a flat bed.
+    x = (np.arange(nc) + 0.5) * dx
+    h_ramp = np.clip(1.0 - 0.012 * (x - 20), 0.2, 1.0)
+    h_r = np.tile(h_ramp, (nr, 1))
+    eta = h_r + z
+
+    eta_p = K._pad(eta, False, False, negate=False)
+    z_p = K._pad(z, False, False, negate=False)
+
+    if order == 2:
+        _, etaR2 = K._muscl_x(eta_p)
+        zL2, zR2 = K._muscl_x(z_p)
+        hpc = np.maximum(0.0, eta_p - z_p)
+        dry = (hpc[:, :-1] <= K._H_DRY) | (hpc[:, 1:] <= K._H_DRY)
+        zL = np.where(dry, z_p[:, :-1], zL2)
+        zR = np.where(dry, z_p[:, 1:], zR2)
+    else:
+        zL, zR = z_p[:, :-1], z_p[:, 1:]
+
+    zf = np.maximum(zL, zR)
+    hLsrc = np.maximum(0.0, eta_p[:, :-1] - zf)
+    hRsrc = np.maximum(0.0, eta_p[:, 1:] - zf)
+    Sx = 0.5 * K._G * (hLsrc[:, 1:] ** 2 - hRsrc[:, :-1] ** 2) / dx
+
+    max_Sx = float(np.max(np.abs(Sx)))
+
+    assert dhu < 1e-12, f"Momentum changed by {dhu:.2e} on flat bed (target < 1e-12)"
+    assert (
+        max_Sx < 1e-12
+    ), f"Spurious bed-slope source generated: {max_Sx:.2e} (target < 1e-12)"
+
+
+@pytest.mark.parametrize("order", [1, 2])
+def test_wb2_slope_rest(order):
+    """
+    WB2: Lake at rest on a sloped bed.
+    Velocity magnitude must stay at machine precision.
+    """
+    nrows, ncols, dx = 5, 60, 1.0
+    grid = _make_grid(nrows, ncols, dx=dx)
+
+    x = (np.arange(ncols) + 0.5) * dx
+    z1d = 0.5 * (x - x.min()) / (x.max() - x.min())  # linear ramp 0→0.5
+    z2d = np.tile(z1d, (nrows, 1))
+
+    eta0 = 0.8
+    h2d = np.maximum(0.0, eta0 - z2d)
+
+    grid.at_node["topographic__elevation"][:] = z2d.ravel()
+    grid.add_field("surface_water__depth", h2d.ravel(), at="node", copy=True)
+
+    hllc = RiverFlowDynamics_HLLC(
+        grid, mannings_n=0.0, cfl=0.4, order=order, wall_edges={"bottom", "top"}
+    )
+
+    umax_history = []
+    nsteps = 1000
+    for _ in range(nsteps):
+        hllc.run_one_step()
+        umax_history.append(_max_speed(grid))
+
+    umax = max(umax_history)
+
+    eta_now = (
+        grid.at_node["surface_water__depth"] + grid.at_node["topographic__elevation"]
+    )
+    eta_flat_err = float(np.max(np.abs(eta_now[grid.core_nodes] - eta0)))
+
+    assert umax < 1e-10, f"Spurious velocity generated: {umax:.2e} m/s (target < 1e-10)"
+    assert (
+        eta_flat_err < 1e-10
+    ), f"Surface deviated from flat state: {eta_flat_err:.2e} m"
+
+
+@pytest.mark.parametrize("order", [1, 2])
+def test_wb3_slope_flow(order):
+    """
+    WB3: Sloped bed + flow. Sanity/stability guard.
+    Ensures finite values and non-negative depth when flow traverses a slope.
+    """
+    nrows, ncols, dx = 5, 60, 1.0
+    grid = _make_grid(nrows, ncols, dx=dx)
+
+    x = (np.arange(ncols) + 0.5) * dx
+    z1d = 0.3 * (x - x.min()) / (x.max() - x.min())
+    z2d = np.tile(z1d, (nrows, 1))
+    h2d = np.maximum(0.1, 0.8 - z2d)
+
+    grid.at_node["topographic__elevation"][:] = z2d.ravel()
+    grid.add_field("surface_water__depth", h2d.ravel(), at="node", copy=True)
+
+    # Impose initial flow via the momentum field before component init binds its view
+    hu0 = grid.add_zeros("surface_water__x_momentum", at="node")
+    hu0[:] = (h2d * 0.3).ravel()  # u ≈ 0.3 m/s
+
+    hllc = RiverFlowDynamics_HLLC(
+        grid, mannings_n=0.03, cfl=0.4, order=order, wall_edges={"bottom", "top"}
+    )
+
+    nsteps = 50
+    for _ in range(nsteps):
+        hllc.run_one_step()
+        h = grid.at_node["surface_water__depth"]
+
+        assert np.all(np.isfinite(h)), "Depth became NaN/Inf"
+        assert not np.any(h < -1e-9), "Depth became negative"

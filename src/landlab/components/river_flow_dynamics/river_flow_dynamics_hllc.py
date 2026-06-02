@@ -207,12 +207,12 @@ def _wave_speeds(hL, uL, hR, uR, g):
     dry_wet = ~wetL & wetR
     # dry/dry → SL = SR = 0; flux is then identically zero (face skipped)
 
-    SL = np.where(wet_wet, SL_ww,
-         np.where(wet_dry, SL_wd,
-         np.where(dry_wet, SL_dw, 0.0)))
-    SR = np.where(wet_wet, SR_ww,
-         np.where(wet_dry, SR_wd,
-         np.where(dry_wet, SR_dw, 0.0)))
+    SL = np.where(
+        wet_wet, SL_ww, np.where(wet_dry, SL_wd, np.where(dry_wet, SL_dw, 0.0))
+    )
+    SR = np.where(
+        wet_wet, SR_ww, np.where(wet_dry, SR_wd, np.where(dry_wet, SR_dw, 0.0))
+    )
 
     # --- contact-wave speed S* (standard formula, clamped to [SL, SR]) ---
     num = hR * uR * (uR - SR) - hL * uL * (uL - SL) + 0.5 * g * (hR**2 - hL**2)
@@ -282,8 +282,16 @@ def _hydro_recon(etaL, etaR, zL, zR):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _solve_subcritical_inflow(q_target, h_interior, hu_interior, hv_interior,
-                              z_ghost, hv_ghost_target, g, side="left"):
+def _solve_subcritical_inflow(
+    q_target,
+    h_interior,
+    hu_interior,
+    hv_interior,
+    z_ghost,
+    hv_ghost_target,
+    g,
+    side="left",
+):
     """Solve for the ghost state at a subcritical inflow boundary that is
     consistent with the prescribed discharge and the interior's outgoing
     Riemann invariant.
@@ -392,26 +400,38 @@ def _build_inflow_ghost(spec, h_int_edge, hu_int_edge, hv_int_edge, g, side):
             with the outgoing Riemann invariant from the interior, which
             is the textbook Godunov-correct subcritical inflow BC.
     """
-    z = spec['z']
-    mode = spec.get('mode', None)
+    z = spec["z"]
+    mode = spec.get("mode", None)
     if mode is None:
-        mode = 'discharge' if 'q' in spec else 'full'
-    if mode == 'full':
-        return spec['h'], spec['hu'], spec['hv'], z
-    elif mode == 'discharge':
-        q = spec['q']
-        hv_target = spec.get('hv', np.zeros_like(q))
+        mode = "discharge" if "q" in spec else "full"
+    if mode == "full":
+        return spec["h"], spec["hu"], spec["hv"], z
+    elif mode == "discharge":
+        q = spec["q"]
+        hv_target = spec.get("hv", np.zeros_like(q))
         h_g, hu_g, hv_g = _solve_subcritical_inflow(
-            q, h_int_edge, hu_int_edge, hv_int_edge,
-            z, hv_target, g, side=side,
+            q,
+            h_int_edge,
+            hu_int_edge,
+            hv_int_edge,
+            z,
+            hv_target,
+            g,
+            side=side,
         )
         return h_g, hu_g, hv_g, z
     else:
         raise ValueError(f"Unknown inflow mode: {mode}")
 
 
-def _pad(q, left_reflect=False, right_reflect=False, negate=False,
-         left_ghost=None, right_ghost=None):
+def _pad(
+    q,
+    left_reflect=False,
+    right_reflect=False,
+    negate=False,
+    left_ghost=None,
+    right_ghost=None,
+):
     """Pad q with ghost cells in the x-direction.
 
     Modes (per side, independent):
@@ -442,8 +462,20 @@ def _pad(q, left_reflect=False, right_reflect=False, negate=False,
     return np.concatenate([lg, q, rg], axis=1)
 
 
-def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1, left_wall=False, right_wall=False,
-             inflow_left=None, inflow_right=None):
+def _x_sweep(
+    h,
+    hu,
+    hv,
+    z,
+    dt,
+    dx,
+    g=_G,
+    order=1,
+    left_wall=False,
+    right_wall=False,
+    inflow_left=None,
+    inflow_right=None,
+):
     """Advance the conservative state by one x-direction sub-step.
 
     inflow_left / inflow_right (optional): dict with keys
@@ -465,40 +497,64 @@ def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1, left_wall=False, right_wall=Fa
     eta_lg = z_lg = hu_lg = hv_lg = None
     eta_rg = z_rg = hu_rg = hv_rg = None
     if inflow_left is not None:
-        h_int_edge  = h[:, 0]
+        h_int_edge = h[:, 0]
         hu_int_edge = hu[:, 0]
         hv_int_edge = hv[:, 0]
         h_g, hu_g, hv_g, z_g = _build_inflow_ghost(
             inflow_left, h_int_edge, hu_int_edge, hv_int_edge, g, side="left"
         )
         eta_lg = h_g + z_g
-        z_lg   = z_g
-        hu_lg  = hu_g
-        hv_lg  = hv_g
+        z_lg = z_g
+        hu_lg = hu_g
+        hv_lg = hv_g
     if inflow_right is not None:
-        h_int_edge  = h[:, -1]
+        h_int_edge = h[:, -1]
         hu_int_edge = hu[:, -1]
         hv_int_edge = hv[:, -1]
         h_g, hu_g, hv_g, z_g = _build_inflow_ghost(
             inflow_right, h_int_edge, hu_int_edge, hv_int_edge, g, side="right"
         )
         eta_rg = h_g + z_g
-        z_rg   = z_g
-        hu_rg  = hu_g
-        hv_rg  = hv_g
+        z_rg = z_g
+        hu_rg = hu_g
+        hv_rg = hv_g
 
     # When inflow is specified, override wall flag on that side
-    eff_left_wall  = left_wall  and (inflow_left  is None)
+    eff_left_wall = left_wall and (inflow_left is None)
     eff_right_wall = right_wall and (inflow_right is None)
 
-    eta_p = _pad(eta, eff_left_wall, eff_right_wall, negate=False,
-                 left_ghost=eta_lg, right_ghost=eta_rg)
-    z_p = _pad(z, eff_left_wall, eff_right_wall, negate=False,
-               left_ghost=z_lg, right_ghost=z_rg)
-    hu_p = _pad(hu, eff_left_wall, eff_right_wall, negate=True,
-                left_ghost=hu_lg, right_ghost=hu_rg)
-    hv_p = _pad(hv, eff_left_wall, eff_right_wall, negate=False,
-                left_ghost=hv_lg, right_ghost=hv_rg)
+    eta_p = _pad(
+        eta,
+        eff_left_wall,
+        eff_right_wall,
+        negate=False,
+        left_ghost=eta_lg,
+        right_ghost=eta_rg,
+    )
+    z_p = _pad(
+        z,
+        eff_left_wall,
+        eff_right_wall,
+        negate=False,
+        left_ghost=z_lg,
+        right_ghost=z_rg,
+    )
+    hu_p = _pad(
+        hu,
+        eff_left_wall,
+        eff_right_wall,
+        negate=True,
+        left_ghost=hu_lg,
+        right_ghost=hu_rg,
+    )
+    hv_p = _pad(
+        hv,
+        eff_left_wall,
+        eff_right_wall,
+        negate=False,
+        left_ghost=hv_lg,
+        right_ghost=hv_rg,
+    )
 
     if order == 2:
         # MUSCL second-order reconstruction
@@ -584,13 +640,26 @@ def _x_sweep(h, hu, hv, z, dt, dx, g=_G, order=1, left_wall=False, right_wall=Fa
     )
 
 
-def _y_sweep(h, hu, hv, z, dt, dy, g=_G, order=1, bottom_wall=False, top_wall=False,
-             inflow_bottom=None, inflow_top=None):
+def _y_sweep(
+    h,
+    hu,
+    hv,
+    z,
+    dt,
+    dy,
+    g=_G,
+    order=1,
+    bottom_wall=False,
+    top_wall=False,
+    inflow_bottom=None,
+    inflow_top=None,
+):
     """Y-direction sub-step.  Implemented by calling _x_sweep on transposed
     arrays with hu/hv swapped (so the "x-momentum" of the sweep is the y
     physical momentum).  Inflow specs are likewise swapped: bottom -> left
     (and the v-component of inflow becomes the swept-direction "hu").
     """
+
     def _swap_spec(s):
         """Transpose a discharge-mode or full-mode inflow spec so that the
         sweep direction's "x-momentum" (hu) carries the physical y-momentum.
@@ -600,16 +669,24 @@ def _y_sweep(h, hu, hv, z, dt, dy, g=_G, order=1, bottom_wall=False, top_wall=Fa
         frame becomes the swept frame's transverse, which is again hv."""
         if s is None:
             return None
-        if s.get('mode') == 'discharge' or 'q' in s:
+        if s.get("mode") == "discharge" or "q" in s:
             # q is already normal-to-boundary; hv stores the tangential
             # momentum in the ORIGINAL frame.  In the swept frame, the
             # tangential is the orthogonal direction, also called hv there.
-            return {'mode': 'discharge', 'q': s['q'], 'hv': s['hv'], 'z': s['z']}
-        return {'h': s['h'], 'hu': s['hv'], 'hv': s['hu'], 'z': s['z']}
+            return {"mode": "discharge", "q": s["q"], "hv": s["hv"], "z": s["z"]}
+        return {"h": s["h"], "hu": s["hv"], "hv": s["hu"], "z": s["z"]}
 
     h_T, hv_T, hu_T = _x_sweep(
-        h.T, hv.T, hu.T, z.T, dt, dy, g, order,
-        left_wall=bottom_wall, right_wall=top_wall,
+        h.T,
+        hv.T,
+        hu.T,
+        z.T,
+        dt,
+        dy,
+        g,
+        order,
+        left_wall=bottom_wall,
+        right_wall=top_wall,
         inflow_left=_swap_spec(inflow_bottom),
         inflow_right=_swap_spec(inflow_top),
     )
@@ -662,10 +739,22 @@ def _step(
     inflow_bottom=None,
     inflow_top=None,
 ):
-    kx = {"g": g, "order": order, "left_wall": left_wall, "right_wall": right_wall,
-          "inflow_left": inflow_left, "inflow_right": inflow_right}
-    ky = {"g": g, "order": order, "bottom_wall": bottom_wall, "top_wall": top_wall,
-          "inflow_bottom": inflow_bottom, "inflow_top": inflow_top}
+    kx = {
+        "g": g,
+        "order": order,
+        "left_wall": left_wall,
+        "right_wall": right_wall,
+        "inflow_left": inflow_left,
+        "inflow_right": inflow_right,
+    }
+    ky = {
+        "g": g,
+        "order": order,
+        "bottom_wall": bottom_wall,
+        "top_wall": top_wall,
+        "inflow_bottom": inflow_bottom,
+        "inflow_top": inflow_top,
+    }
     P = _pos
     if step_count % 2 == 0:
         h, hu, hv = P(*_x_sweep(h, hu, hv, z, dt / 2, dx, **kx))
@@ -976,10 +1065,10 @@ class RiverFlowDynamics_HLLC(Component):
         # spurious Riemann problem at the face to the next interior cell
         # whenever the interior deviates from the prescribed state, with
         # mass and momentum lost to that internal wave structure.
-        self._inflow_left_spec   = None
-        self._inflow_right_spec  = None
+        self._inflow_left_spec = None
+        self._inflow_right_spec = None
         self._inflow_bottom_spec = None
-        self._inflow_top_spec    = None
+        self._inflow_top_spec = None
         if fixed_entry_nodes is not None:
             self._entry_nodes = np.asarray(fixed_entry_nodes, dtype=int)
             n = len(self._entry_nodes)
@@ -1008,10 +1097,10 @@ class RiverFlowDynamics_HLLC(Component):
             # row/column so the ghost is consistent with the interior bed.
             z_2d = self._z
             for side, mask in (
-                ("left",   self._entry_cols == 0),
-                ("right",  self._entry_cols == nc - 1),
+                ("left", self._entry_cols == 0),
+                ("right", self._entry_cols == nc - 1),
                 ("bottom", self._entry_rows == 0),
-                ("top",    self._entry_rows == nr - 1),
+                ("top", self._entry_rows == nr - 1),
             ):
                 if not mask.any():
                     continue
@@ -1024,17 +1113,21 @@ class RiverFlowDynamics_HLLC(Component):
                 if side in ("left", "right"):
                     edge_len = nr
                     col_idx = 0 if side == "left" else nc - 1
-                    q_edge  = np.zeros(edge_len)
+                    q_edge = np.zeros(edge_len)
                     hv_edge = np.zeros(edge_len)
-                    z_edge  = z_2d[:, col_idx].copy()
+                    z_edge = z_2d[:, col_idx].copy()
                     rows_here = self._entry_rows[mask]
                     h_vals = self._entry_h[mask]
                     u_vals = self._entry_u[mask]
                     v_vals = self._entry_v[mask]
-                    q_edge[rows_here]  = h_vals * u_vals       # discharge = h * u
-                    hv_edge[rows_here] = h_vals * v_vals       # transverse momentum target
-                    spec = {'mode': 'discharge',
-                            'q': q_edge, 'hv': hv_edge, 'z': z_edge}
+                    q_edge[rows_here] = h_vals * u_vals  # discharge = h * u
+                    hv_edge[rows_here] = h_vals * v_vals  # transverse momentum target
+                    spec = {
+                        "mode": "discharge",
+                        "q": q_edge,
+                        "hv": hv_edge,
+                        "z": z_edge,
+                    }
                     if side == "left":
                         self._inflow_left_spec = spec
                     else:
@@ -1042,9 +1135,9 @@ class RiverFlowDynamics_HLLC(Component):
                 else:  # bottom / top
                     edge_len = nc
                     row_idx = 0 if side == "bottom" else nr - 1
-                    q_edge  = np.zeros(edge_len)
+                    q_edge = np.zeros(edge_len)
                     hv_edge = np.zeros(edge_len)
-                    z_edge  = z_2d[row_idx, :].copy()
+                    z_edge = z_2d[row_idx, :].copy()
                     cols_here = self._entry_cols[mask]
                     h_vals = self._entry_h[mask]
                     u_vals = self._entry_u[mask]
@@ -1054,10 +1147,14 @@ class RiverFlowDynamics_HLLC(Component):
                     # We store the spec under the original (x, y) convention; the
                     # _swap_spec function in _y_sweep handles the transpose.
                     # Here q = h * v_n (normal velocity into domain).
-                    q_edge[cols_here]  = h_vals * v_vals
+                    q_edge[cols_here] = h_vals * v_vals
                     hv_edge[cols_here] = h_vals * u_vals  # tangential = x-momentum
-                    spec = {'mode': 'discharge',
-                            'q': q_edge, 'hv': hv_edge, 'z': z_edge}
+                    spec = {
+                        "mode": "discharge",
+                        "q": q_edge,
+                        "hv": hv_edge,
+                        "z": z_edge,
+                    }
                     if side == "bottom":
                         self._inflow_bottom_spec = spec
                     else:

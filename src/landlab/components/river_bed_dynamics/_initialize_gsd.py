@@ -280,7 +280,7 @@ def map_initial_bed_properties_to_nodes(gsd, gsd_loc_node):
     gs_D_equiv_freq = np.zeros([gsd_loc_node.size, gs_D_eq.shape[0]])
 
     for i in range(gs_freq.shape[1]):
-        (id_gsd_loc) = np.where(gsd_loc_node == i)
+        id_gsd_loc = np.where(gsd_loc_node == i)
         sand_fraction[id_gsd_loc] = sand_fraction_0[0, i] / 100
         gs_D_equiv_freq[id_gsd_loc, :] = gs_freq[:, i]
 

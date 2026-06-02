@@ -149,11 +149,11 @@ def bedload_equation(self):
         phi_i[:, i] = phi_sg0 * (gs[i] / (gs_geom_mean)) ** (-b)
 
     # There are two intervals where qb_G is evaluated
-    (id0, id1) = np.where(phi_i >= 1.35)
+    id0, id1 = np.where(phi_i >= 1.35)
     if id0.shape[0] > 0:
         qb_G[id0, id1] = 14 * (1 - 0.894 / (phi_i[id0, id1] ** 0.5)) ** 4.5
 
-    (id0, id1) = np.where(phi_i < 1.35)
+    id0, id1 = np.where(phi_i < 1.35)
     if id0.shape[0] > 0:
         qb_G[id0, id1] = 0.002 * phi_i[id0, id1] ** 7.5
 

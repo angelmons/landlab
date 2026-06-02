@@ -25,7 +25,7 @@ def build(session: nox.Session) -> str:
     """Build sdist and wheel dists."""
     outdir = str(PATH["build"] / "wheelhouse")
 
-    os.environ["WITH_OPENMP"] = "1"
+    os.environ["WITH_OPENMP"] = "0"
 
     session.log(f"CC = {os.environ.get('CC', 'NOT FOUND')}")
     session.install(

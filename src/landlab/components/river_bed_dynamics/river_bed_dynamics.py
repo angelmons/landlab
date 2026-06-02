@@ -1049,24 +1049,27 @@ class RiverBedDynamics(Component):
         self._g = scipy.constants.g  # Acceleration due to gravity (m/s**2).
         # Water temperature effects
         self._rho = rho
-        from ._fluid_properties import water_density, water_viscosity
-    
-        self._water_temperature = water_temperature   # stored, may be updated by RiverTemperatureDynamics
+        from ._fluid_properties import water_density
+        from ._fluid_properties import water_viscosity
+
+        self._water_temperature = (
+            water_temperature  # stored, may be updated by RiverTemperatureDynamics
+        )
         self._variable_fluid_properties = variable_fluid_properties
-    
+
         if variable_fluid_properties:
             # Initialise per-link arrays from the scalar or array temperature
             T = np.broadcast_to(
                 np.asarray(water_temperature, dtype=float),
                 (grid.number_of_links,),
             )
-            self._rho = water_density(T)         # overrides the scalar rho param
-            self._mu  = water_viscosity(T)
+            self._rho = water_density(T)  # overrides the scalar rho param
+            self._mu = water_viscosity(T)
         else:
             # Backward-compatible: scalar constants, mu defaults to 20 °C value
-            self._mu = water_viscosity(20.0)     # scalar — only used for Re_s
+            self._mu = water_viscosity(20.0)  # scalar — only used for Re_s
         # end of water temperature effects
-        
+
         self._rho_s = rho_s
         self._R = (rho_s - rho) / rho
 
@@ -1092,7 +1095,7 @@ class RiverBedDynamics(Component):
         self._shear_calc = ShearStressCalculator(
             use_hydraulics_radius=use_hydraulics_radius_in_shear_stress,
             formulation=shear_stress_formulation,
-            mannings_n=mannings_n
+            mannings_n=mannings_n,
         )
         self._gsd_evolver = ToroEscobarEvolver(
             gsd_advection_scheme=gsd_advection_scheme
@@ -1414,7 +1417,7 @@ class RiverBedDynamics(Component):
         median_size_D50 = self.calculate_DX(
             gs_D_equiv_freq, 0.5
         )  # Median grain size in each node
-        (gs_geom_mean, gs_geo_std) = self.calculate_gsd_geo_mean_and_geo_std(
+        gs_geom_mean, gs_geo_std = self.calculate_gsd_geo_mean_and_geo_std(
             gs_D_equiv_freq
         )
 
@@ -1572,26 +1575,24 @@ class RiverBedDynamics(Component):
         T : float or ndarray
             Water temperature [°C].  Scalar or per-link array.
         """
-        from ._fluid_properties import water_density, water_viscosity
+        from ._fluid_properties import water_density
+        from ._fluid_properties import water_viscosity
+
         T_arr = np.broadcast_to(
             np.asarray(T, dtype=float), (self._grid.number_of_links,)
         )
         self._water_temperature = T_arr
         self._rho = water_density(T_arr)
-        self._mu  = water_viscosity(T_arr)
+        self._mu = water_viscosity(T_arr)
 
     @property
     def water_density_link(self) -> np.ndarray:
-        return np.broadcast_to(
-            np.asarray(self._rho), (self._grid.number_of_links,)
-        )
+        return np.broadcast_to(np.asarray(self._rho), (self._grid.number_of_links,))
 
     @property
     def water_dynamic_viscosity_link(self) -> np.ndarray:
-        return np.broadcast_to(
-            np.asarray(self._mu), (self._grid.number_of_links,)
-        )
-    
+        return np.broadcast_to(np.asarray(self._mu), (self._grid.number_of_links,))
+
     def shear_stress(self):
         """Compute unsteady shear stress at every link.
 

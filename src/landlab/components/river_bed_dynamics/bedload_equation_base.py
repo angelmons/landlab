@@ -246,10 +246,10 @@ class WilcockCrowe2003Equation(BedloadEquation):
 #: Maps ``bedload_equation`` parameter strings to :class:`BedloadEquation`
 #: subclasses. Add new entries here to register additional equations.
 EQUATION_REGISTRY: dict[str, type[BedloadEquation]] = {
-    "MPM":            MPMEquation,
-    "FLvB":           FLvBEquation,
-    "WongAndParker":  WongAndParkerEquation,
-    "Huang":          HuangEquation,
-    "Parker1990":     Parker1990Equation,
+    "MPM": MPMEquation,
+    "FLvB": FLvBEquation,
+    "WongAndParker": WongAndParkerEquation,
+    "Huang": HuangEquation,
+    "Parker1990": Parker1990Equation,
     "WilcockAndCrowe": WilcockCrowe2003Equation,
 }

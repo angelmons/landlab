@@ -1,5 +1,5 @@
 """
-Temperature-aware critical Shields stress calculator for RiverBedDynamics.
+Critical Shields stress calculator for RiverBedDynamics.
 
 This module replaces the fixed ``tau_star_cr = 0.047`` (MPM constant) and the
 existing ``variable_critical_shear_stress`` slope-based logic with a physically
@@ -38,21 +38,18 @@ Paphitis, D. (2001). Sediment movement under unidirectional flows: an
 Link et al. (2019). Temperature effects on critical Shields stress.
 Heggen, R. J. (1983). Journal of Hydraulic Engineering, 109(2), 298-302.
 
-.. codeauthor:: RiverDynamics v1 team
+.. codeauthor:: Angel Monsalve
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from ._fluid_properties import (
-    paphitis_tau_cr_star,
-    particle_reynolds,
-    shields_stress,
-    viscous_sublayer_thickness,
-    water_density,
-    water_viscosity,
-)
+from ._fluid_properties import paphitis_tau_cr_star
+from ._fluid_properties import particle_reynolds
+from ._fluid_properties import viscous_sublayer_thickness
+from ._fluid_properties import water_density
+from ._fluid_properties import water_viscosity
 
 # von Kármán constant
 _KAPPA = 0.41
@@ -114,9 +111,9 @@ def _log_law_u_star(
     for _ in range(max_iter):
         Re_s = particle_reynolds(u_star, D50_m, rho, mu)
         ln_Re = np.log(np.maximum(Re_s, 1e-10))
-        B_s = 8.5 + (2.5 * ln_Re - 3.0) * np.exp(-0.127 * ln_Re ** 2)
+        B_s = 8.5 + (2.5 * ln_Re - 3.0) * np.exp(-0.127 * ln_Re**2)
         log_term = np.log(np.maximum(0.368 * h / D50_m, 1.0))
-        rhs = (log_term / _KAPPA + B_s)  # U/u* from log-law
+        rhs = log_term / _KAPPA + B_s  # U/u* from log-law
         u_star_new = np.where(rhs > 0, U / rhs, u_star)
         err = np.max(np.abs(u_star_new - u_star) / np.maximum(u_star, 1e-10))
         u_star = u_star_new
@@ -210,7 +207,7 @@ def compute_critical_shear_stress(
 
     # ── Step 1: u* from current flow via temperature-aware log-law ───────────
     u_star = _log_law_u_star(U, h, D50_m, rho, mu)
-    tau = rho * u_star ** 2
+    tau = rho * u_star**2
 
     # ── Step 2: tau* for current flow ─────────────────────────────────────────
     submerged_weight = np.maximum((rho_s - rho) * g * D50_m, 1e-30)
@@ -225,9 +222,7 @@ def compute_critical_shear_stress(
         tau_cr_star = paphitis_tau_cr_star(Re_s_cr)
         tau_cr = tau_cr_star * submerged_weight
         u_star_cr_new = np.sqrt(np.maximum(tau_cr / rho, 0.0))
-        err = np.max(
-            np.abs(u_star_cr_new - u_star_cr) / np.maximum(u_star_cr, 1e-12)
-        )
+        err = np.max(np.abs(u_star_cr_new - u_star_cr) / np.maximum(u_star_cr, 1e-12))
         u_star_cr = u_star_cr_new
         if err < tol:
             break

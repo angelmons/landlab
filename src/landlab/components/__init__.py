@@ -175,7 +175,7 @@ COMPONENTS = [
     RiverFlowDynamics,
     RiverFlowDynamics_HLLC,
     RiverSoluteTransportDynamics,
-    RiverTemperatureDynamics,    
+    RiverTemperatureDynamics,
     SedDepEroder,
     SedimentPulserAtLinks,
     SedimentPulserEachParcel,

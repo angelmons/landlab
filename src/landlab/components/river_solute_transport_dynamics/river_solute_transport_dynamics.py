@@ -11,32 +11,27 @@ Written by Angel Monsalve, 2026.
 Key physics
 -----------
 Main-channel equation (OTIS Eq. 3, extended to 2D):
+Governing equation:
 
-.. math::
+dC/dt + u(dC/dx) + v(dC/dy) =
+      d/dx[ D_L (dC/dx) ]
+    + d/dy[ D_T (dC/dy) ]
+    + (q_LIN / h) * (C_L - C)
+    + alpha * (C_S - C)
+    - lambda * C
+    + rho * lambda_hat * (C_sed - K_d * C)
 
-    \\frac{\\partial C}{\\partial t}
-    + u \\frac{\\partial C}{\\partial x}
-    + v \\frac{\\partial C}{\\partial y}
-    = \\frac{\\partial}{\\partial x}\\!\\left(D_L \\frac{\\partial C}{\\partial x}\\right)
-    + \\frac{\\partial}{\\partial y}\\!\\left(D_T \\frac{\\partial C}{\\partial y}\\right)
-    + \\frac{q_{LIN}}{h}(C_L - C)
-    + \\alpha (C_S - C)
-    - \\lambda C
-    + \\rho \\hat{\\lambda}(C_{sed} - K_d C)
+d is used in place of the partial derivative symbol ∂ to ensure strict ASCII compatibility
 
 Storage-zone equation (OTIS Eq. 4):
 
-.. math::
-
-    \\frac{dC_S}{dt} = \\alpha \\frac{h}{h_S}(C - C_S)
-                      + \\hat{\\lambda}_S(\\hat{C}_S - C_S)
-                      - \\lambda_S C_S
+dC_S/dt = alpha * (h / h_S) * (C - C_S)
+        + lambda_hat_S * (C_hat_S - C_S)
+        - lambda_S * C_S
 
 Streambed sediment equation (OTIS Eq. 5):
 
-.. math::
-
-    \\frac{dC_{sed}}{dt} = \\hat{\\lambda}(K_d C - C_{sed})
+dC_sed/dt = lambda_hat * (K_d * C - C_sed)
 
 The operator-splitting order is:
 
@@ -93,12 +88,11 @@ Run for 10 time steps.
 ...     grid.at_node["surface_water__chloride__concentration"][left] = 11.4
 ...     rstd.run_one_step(dt)
 ...     grid.at_node["surface_water__chloride__concentration"][left] = 11.4
+...
 
 Concentration at the left edge should still be pinned.
 
->>> np.allclose(
-...     grid.at_node["surface_water__chloride__concentration"][left], 11.4
-... )
+>>> np.allclose(grid.at_node["surface_water__chloride__concentration"][left], 11.4)
 True
 
 Concentration everywhere should remain within physically reasonable bounds.
@@ -226,9 +220,7 @@ class RiverSoluteTransportDynamics(Component):
             "optional": False,
             "units": "m/s",
             "mapping": "link",
-            "doc": (
-                "Link-parallel advection velocity used by AdvectionSolverTVD."
-            ),
+            "doc": ("Link-parallel advection velocity used by AdvectionSolverTVD."),
         },
     }
 
@@ -272,7 +264,7 @@ class RiverSoluteTransportDynamics(Component):
         if dispersion_mode not in valid_modes:
             raise ValueError(
                 f"dispersion_mode must be one of {valid_modes}, "
-                f"got '{dispersion_mode}'"
+                f"got {dispersion_mode!r}"
             )
         self._dispersion_mode = dispersion_mode
         self._D_iso = dispersion_coefficient
@@ -304,7 +296,7 @@ class RiverSoluteTransportDynamics(Component):
         if outlet_boundary_condition not in valid_bcs:
             raise ValueError(
                 f"outlet_boundary_condition must be one of {valid_bcs}, "
-                f"got '{outlet_boundary_condition}'"
+                f"got {outlet_boundary_condition!r}"
             )
         self._outlet_bc = outlet_boundary_condition
         self._fixed_outlet_conc = fixed_outlet_concentration or {}
@@ -319,9 +311,7 @@ class RiverSoluteTransportDynamics(Component):
 
         # Optional lateral inflow field
         if "lateral__water_specific_discharge" in grid.at_node:
-            self._q_lat = grid.at_node[
-                "lateral__water_specific_discharge"
-            ]
+            self._q_lat = grid.at_node["lateral__water_specific_discharge"]
         else:
             self._q_lat = np.zeros(grid.number_of_nodes)
 
@@ -341,9 +331,7 @@ class RiverSoluteTransportDynamics(Component):
 
             self._advectors[solute] = AdvectionSolverTVD(
                 grid,
-                fields_to_advect=(
-                    f"surface_water__{solute}__concentration"
-                ),
+                fields_to_advect=(f"surface_water__{solute}__concentration"),
             )
 
     # ------------------------------------------------------------------
@@ -369,9 +357,7 @@ class RiverSoluteTransportDynamics(Component):
 
         # -- Build dispersion coefficient array on links --
         if self._dispersion_mode == "anisotropic":
-            h_link = grid.map_mean_of_link_nodes_to_link(
-                "surface_water__depth"
-            )
+            h_link = grid.map_mean_of_link_nodes_to_link("surface_water__depth")
             h_link = np.maximum(h_link, self._h_min)
             u_star = np.abs(self._adv_vel) * self._ustar_fraction
 
@@ -397,21 +383,17 @@ class RiverSoluteTransportDynamics(Component):
             if np.ndim(D_L_val) == 0:
                 D_link[grid.horizontal_links] = float(D_L_val)
             else:
-                D_link[grid.horizontal_links] = (
-                    grid.map_mean_of_link_nodes_to_link(
-                        np.asarray(D_L_val, dtype=float)
-                    )[grid.horizontal_links]
-                )
+                D_link[grid.horizontal_links] = grid.map_mean_of_link_nodes_to_link(
+                    np.asarray(D_L_val, dtype=float)
+                )[grid.horizontal_links]
 
             # Transverse (vertical links)
             if np.ndim(D_T_val) == 0:
                 D_link[grid.vertical_links] = float(D_T_val)
             else:
-                D_link[grid.vertical_links] = (
-                    grid.map_mean_of_link_nodes_to_link(
-                        np.asarray(D_T_val, dtype=float)
-                    )[grid.vertical_links]
-                )
+                D_link[grid.vertical_links] = grid.map_mean_of_link_nodes_to_link(
+                    np.asarray(D_T_val, dtype=float)
+                )[grid.vertical_links]
 
         # -- Velocity divergence (computed once for all solutes) --
         div_u = grid.calc_flux_div_at_node(self._adv_vel)
@@ -483,18 +465,10 @@ class RiverSoluteTransportDynamics(Component):
         h = np.maximum(self._h, self._h_min)
 
         for solute in self._solutes:
-            C = self._grid.at_node[
-                f"surface_water__{solute}__concentration"
-            ]
-            C_s = self._grid.at_node[
-                f"storage_zone__{solute}__concentration"
-            ]
-            C_sed = self._grid.at_node[
-                f"streambed__{solute}__sorbate_concentration"
-            ]
-            C_lat = self._grid.at_node[
-                f"lateral__{solute}__concentration"
-            ]
+            C = self._grid.at_node[f"surface_water__{solute}__concentration"]
+            C_s = self._grid.at_node[f"storage_zone__{solute}__concentration"]
+            C_sed = self._grid.at_node[f"streambed__{solute}__sorbate_concentration"]
+            C_lat = self._grid.at_node[f"lateral__{solute}__concentration"]
 
             # Retrieve per-solute parameters
             alpha = self._get_param(self._alpha, solute)
@@ -510,8 +484,9 @@ class RiverSoluteTransportDynamics(Component):
             C_old = C.copy()
 
             # ── Step 2: Main-channel update (OTIS Eq. 3 sources) ─
-            rho = self._get_param(self._rho_sed, solute,
-                                  default=self._rho_sed.get("__default__", 0.0))
+            rho = self._get_param(
+                self._rho_sed, solute, default=self._rho_sed.get("__default__", 0.0)
+            )
             #    Explicit Euler for lateral inflow, storage exchange,
             #    decay, and sorption.  Storage exchange uses C_S^j
             #    (current storage concentration).
@@ -521,10 +496,7 @@ class RiverSoluteTransportDynamics(Component):
             sorption = rho * lam_hat * (C_sed - Kd * C)
 
             C[core] += (
-                lat_flux[core]
-                + storage_flux[core]
-                + decay[core]
-                + sorption[core]
+                lat_flux[core] + storage_flux[core] + decay[core] + sorption[core]
             ) * dt
             # C is now at time level j+1
 
@@ -551,18 +523,16 @@ class RiverSoluteTransportDynamics(Component):
                     # scalar alpha > 0: update all core nodes
                     C_s[core] = numerator[core] / denominator[core]
                 else:
-                    mask = np.isin(
-                        np.arange(self._grid.number_of_nodes), core
-                    ) & has_storage
+                    mask = (
+                        np.isin(np.arange(self._grid.number_of_nodes), core)
+                        & has_storage
+                    )
                     C_s[mask] = numerator[mask] / denominator[mask]
 
             # ── Step 4: Bed sediment (OTIS Eq. 26, decoupled) ────
             lam_hat_dt = lam_hat * dt
 
-            num_sed = (
-                (2.0 - lam_hat_dt) * C_sed
-                + lam_hat_dt * Kd * (C_old + C)
-            )
+            num_sed = (2.0 - lam_hat_dt) * C_sed + lam_hat_dt * Kd * (C_old + C)
             den_sed = 2.0 + lam_hat_dt
 
             has_sorption = np.asarray(lam_hat > 0)
@@ -570,9 +540,10 @@ class RiverSoluteTransportDynamics(Component):
                 if np.ndim(has_sorption) == 0:
                     C_sed[core] = num_sed[core] / den_sed[core]
                 else:
-                    mask = np.isin(
-                        np.arange(self._grid.number_of_nodes), core
-                    ) & has_sorption
+                    mask = (
+                        np.isin(np.arange(self._grid.number_of_nodes), core)
+                        & has_sorption
+                    )
                     C_sed[mask] = num_sed[mask] / den_sed[mask]
 
             # ── Non-negativity enforcement ────────────────────────
@@ -586,17 +557,14 @@ class RiverSoluteTransportDynamics(Component):
     def _apply_boundaries(self):
         """Apply downstream outlet boundary conditions for all solutes."""
         for solute in self._solutes:
-            C = self._grid.at_node[
-                f"surface_water__{solute}__concentration"
-            ]
+            C = self._grid.at_node[f"surface_water__{solute}__concentration"]
 
             if self._outlet_bc == "zero_gradient":
                 C[self._outlet_nodes] = C[self._outlet_interior_1]
 
             elif self._outlet_bc == "gradient_preserving":
                 C[self._outlet_nodes] = (
-                    2.0 * C[self._outlet_interior_1]
-                    - C[self._outlet_interior_2]
+                    2.0 * C[self._outlet_interior_1] - C[self._outlet_interior_2]
                 )
 
             elif self._outlet_bc == "fixed_value":

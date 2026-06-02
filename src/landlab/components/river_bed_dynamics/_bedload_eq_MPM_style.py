@@ -333,15 +333,15 @@ def _compute_qb(rbd, equation_fn):
         Volumetric bedload transport rate per unit width [m²/s] at each link.
         Signed: positive in the positive link direction.
     """
-    shear_stress        = rbd._surface_water__shear_stress_link
+    shear_stress = rbd._surface_water__shear_stress_link
     shear_stress_signed = rbd._shear_stress
-    rho   = rbd._rho          # scalar OR per-link ndarray
-    R     = rbd._R            # (rho_s - rho) / rho — scalar OR array
-    g     = rbd._g
+    rho = rbd._rho  # scalar OR per-link ndarray
+    R = rbd._R  # (rho_s - rho) / rho — scalar OR array
+    g = rbd._g
     gs_D50 = rbd._bed_surf__median_size_link
-    dz_ds  = rbd._dz_ds
-    var_cr_shear_stress      = rbd._variable_critical_shear_stress
-    bedload_rate_fix_link    = rbd._sed_transp__bedload_rate_fix_link
+    dz_ds = rbd._dz_ds
+    var_cr_shear_stress = rbd._variable_critical_shear_stress
+    bedload_rate_fix_link = rbd._sed_transp__bedload_rate_fix_link
     bedload_rate_fix_link_id = rbd._sed_transp__bedload_rate_fix_link_id
 
     # ── Dimensionless Shields stress ───────────────────────────────────────
@@ -354,16 +354,16 @@ def _compute_qb(rbd, equation_fn):
     # Computed once and passed to the sub-function via _get_tau_star_cr.
     # Only active when variable_fluid_properties=False and
     # variable_critical_shear_stress=True.
-    bed_slope     = dz_ds * np.sign(shear_stress_signed)
+    bed_slope = dz_ds * np.sign(shear_stress_signed)
     tau_star_cr_0 = np.where(bed_slope > 0.03, 2.18 * bed_slope + 0.021, 0)
 
     qb_star = np.zeros_like(tau_star)
     qb_star = equation_fn(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0)
     qb_star = np.where(np.isnan(qb_star), 0, qb_star)
 
-    qb = (
-        qb_star * (np.sqrt(R * g * (gs_D50 / 1000)) * (gs_D50 / 1000))
-    ) * np.sign(shear_stress_signed)
+    qb = (qb_star * (np.sqrt(R * g * (gs_D50 / 1000)) * (gs_D50 / 1000))) * np.sign(
+        shear_stress_signed
+    )
 
     # ── Restore fixed bed load rates at fixed links ────────────────────────
     if bedload_rate_fix_link_id.size > 0:
@@ -397,10 +397,10 @@ def bedload_equation(rbd):
         stacklevel=2,
     )
     _dispatch = {
-        "MPM":           MeyerPeter_Muller,
-        "FLvB":          FernandezLuque_VanBeek,
+        "MPM": MeyerPeter_Muller,
+        "FLvB": FernandezLuque_VanBeek,
         "WongAndParker": Wong_Parker,
-        "Huang":         Huang,
+        "Huang": Huang,
     }
     fn = _dispatch[rbd._bedload_equation]
     return _compute_qb(rbd, fn)
@@ -424,7 +424,7 @@ def MeyerPeter_Muller(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0
     """
     tau_star_cr = _get_tau_star_cr(rbd, tau_star, 0.047, tau_star_cr_0)
     qb_star_coeff = 8
-    qb_star_exp   = 3 / 2
+    qb_star_exp = 3 / 2
 
     mask = tau_star > tau_star_cr
     qb_star[mask] = qb_star_coeff * (tau_star[mask] - tau_star_cr[mask]) ** qb_star_exp
@@ -439,7 +439,7 @@ def FernandezLuque_VanBeek(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star
     """
     tau_star_cr = _get_tau_star_cr(rbd, tau_star, 0.045, tau_star_cr_0)
     qb_star_coeff = 5.7
-    qb_star_exp   = 3 / 2
+    qb_star_exp = 3 / 2
 
     mask = tau_star > tau_star_cr
     qb_star[mask] = qb_star_coeff * (tau_star[mask] - tau_star_cr[mask]) ** qb_star_exp
@@ -455,7 +455,7 @@ def Wong_Parker(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0):
     """
     tau_star_cr = _get_tau_star_cr(rbd, tau_star, 0.047, tau_star_cr_0)
     qb_star_coeff = 4.93
-    qb_star_exp   = 1.6
+    qb_star_exp = 1.6
 
     mask = tau_star > tau_star_cr
     qb_star[mask] = qb_star_coeff * (tau_star[mask] - tau_star_cr[mask]) ** qb_star_exp
@@ -471,7 +471,7 @@ def Huang(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0):
     """
     tau_star_cr = _get_tau_star_cr(rbd, tau_star, 0.047, tau_star_cr_0)
     qb_star_coeff = 6.0
-    qb_star_exp   = 5 / 3
+    qb_star_exp = 5 / 3
 
     mask = tau_star > tau_star_cr
     qb_star[mask] = qb_star_coeff * (tau_star[mask] - tau_star_cr[mask]) ** qb_star_exp

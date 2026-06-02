@@ -299,11 +299,11 @@ class RiverTemperatureDynamics(Component):
     # does not raise a missing-field error.
     # ------------------------------------------------------------------
     _ATMOS_FORCING_FIELDS = {
-        "air__temperature":                 "deg C",
-        "air__relative_humidity":           "%",
-        "air__velocity":                    "m/s",
+        "air__temperature": "deg C",
+        "air__relative_humidity": "%",
+        "air__velocity": "m/s",
         "radiation__incoming_shortwave_flux": "W/m^2",
-        "solar__altitude_angle":            "rad",
+        "solar__altitude_angle": "rad",
     }
 
     def __init__(
@@ -483,9 +483,7 @@ class RiverTemperatureDynamics(Component):
         self._interp_Ta = interp1d(
             df["time_sec"], df["T_air"], fill_value="extrapolate"
         )
-        self._interp_RH = interp1d(
-            df["time_sec"], df["RH"], fill_value="extrapolate"
-        )
+        self._interp_RH = interp1d(df["time_sec"], df["RH"], fill_value="extrapolate")
         self._interp_wind = interp1d(
             df["time_sec"], df["u_wind"], fill_value="extrapolate"
         )
@@ -552,12 +550,26 @@ class RiverTemperatureDynamics(Component):
             T > 35,
         ]
         a1 = [
-            610.483, 610.483, 516.891, 273.444, -193.717,
-            -979.786, -2211.018, -4037.268, -6648.520,
+            610.483,
+            610.483,
+            516.891,
+            273.444,
+            -193.717,
+            -979.786,
+            -2211.018,
+            -4037.268,
+            -6648.520,
         ]
         b1 = [
-            37.7569, 52.3690, 71.0875, 95.4322, 126.5763,
-            165.8797, 215.1290, 276.0040, 350.6112,
+            37.7569,
+            52.3690,
+            71.0875,
+            95.4322,
+            126.5763,
+            165.8797,
+            215.1290,
+            276.0040,
+            350.6112,
         ]
         a_sel = np.select(conditions, a1, default=a1[-1])
         b_sel = np.select(conditions, b1, default=b1[-1])
@@ -595,7 +607,7 @@ class RiverTemperatureDynamics(Component):
             Dynamic viscosity [Pa s].
         """
         T = np.asarray(T, dtype=float)
-        return (0.20319 + 1.5883 * np.exp(-(T ** 0.9) / 22.0)) * 1e-3
+        return (0.20319 + 1.5883 * np.exp(-(T**0.9) / 22.0)) * 1e-3
 
     def _update_water_properties(self):
         """Recompute rho and mu from the current temperature field.
@@ -617,7 +629,7 @@ class RiverTemperatureDynamics(Component):
 
     def atmospheric_net_heat_exchange(self, dt):
         """Calculate the net heat flux (including bed and GW) and update temperature."""
-        
+
         T = self._T
         Ta = self._T_air
         RH = self._RH
@@ -732,9 +744,7 @@ class RiverTemperatureDynamics(Component):
             * u_star[grid.horizontal_links]
         )
         D_link[grid.vertical_links] = (
-            self._alpha_T
-            * h_link[grid.vertical_links]
-            * u_star[grid.vertical_links]
+            self._alpha_T * h_link[grid.vertical_links] * u_star[grid.vertical_links]
         )
 
         grad_T = grid.calc_grad_at_link("surface_water__temperature")
@@ -783,9 +793,9 @@ class RiverTemperatureDynamics(Component):
         """
         if t_sim is not None:
             self.update_meteorology(t_sim)
-            
+
         self._update_water_properties()
-        
+
         self.temperature_advection_dispersion(dt)
 
         if self._heat_exchange:

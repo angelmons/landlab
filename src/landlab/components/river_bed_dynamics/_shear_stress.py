@@ -92,7 +92,12 @@ class ShearStressCalculator:
     cases identically without conditional logic or data copies.
     """
 
-    def __init__(self, use_hydraulics_radius: bool = False, formulation: str = "boussinesq", mannings_n: float | None = None) -> None:
+    def __init__(
+        self,
+        use_hydraulics_radius: bool = False,
+        formulation: str = "boussinesq",
+        mannings_n: float | None = None,
+    ) -> None:
         """Initialise the shear stress calculator.
 
         Parameters
@@ -110,7 +115,9 @@ class ShearStressCalculator:
         self._mannings_n = mannings_n
 
         if self._formulation == "velocity_driven" and self._mannings_n is None:
-            raise ValueError("mannings_n must be provided when using the 'velocity_driven' formulation.")
+            raise ValueError(
+                "mannings_n must be provided when using the 'velocity_driven' formulation."
+            )
 
     def calculate(self, rbd) -> None:
         g = rbd._grid
@@ -127,8 +134,14 @@ class ShearStressCalculator:
         if self._formulation == "velocity_driven":
 
             h_safe = np.maximum(h_links, 1e-6)
-            tau_mag = rho * rbd._g * (self._mannings_n**2) * (rbd._u**2) / (h_safe**(1.0/3.0))
-            
+            tau_mag = (
+                rho
+                * rbd._g
+                * (self._mannings_n**2)
+                * (rbd._u**2)
+                / (h_safe ** (1.0 / 3.0))
+            )
+
             # Direction strictly follows the water velocity vector
             rbd._shear_stress = tau_mag * np.sign(rbd._u)
 
@@ -139,8 +152,8 @@ class ShearStressCalculator:
 
             # ∂U/∂s — velocity gradient at links
             du_ds = rbd._topo_du_ds_scratch
-            du_ds[:] = 0.0  
-            
+            du_ds[:] = 0.0
+
             u_nodes_h = g.map_mean_of_horizontal_links_to_node(rbd._u)
             hl = rbd._topo_horizontal_links
             du_ds[hl] = g.calc_grad_at_link(u_nodes_h)[hl]
@@ -159,7 +172,7 @@ class ShearStressCalculator:
             sf = rbd._dz_ds - dh_ds - (rbd._u / rbd._g) * du_ds - du_dt / rbd._g
 
             if self._use_hydraulics_radius:
-                area = rbd._scratch_area        
+                area = rbd._scratch_area
                 perimeter = rbd._scratch_perimeter
                 area[hl] = h_links[hl] * g.dx
                 area[vl] = h_links[vl] * g.dy
