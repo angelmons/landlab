@@ -4,7 +4,9 @@ This component implements a semi-implicit, semi-Lagrangian finite-volume approxi
 the depth-averaged shallow water equations originally proposed by Casulli and Cheng in 1992,
 and subsequent related work.
 
-Written by Sebastian Bernal and Angel Monsalve.
+Written by:
+v1.0 Sebastian Bernal
+v2.0 Angel Monsalve.
 
 Compared to the version published on JOSS (v1.0), the current version includes:
 
@@ -55,8 +57,7 @@ Code architecture:
 - np.hypot for speed magnitude (numerically cleaner than manual sqrt(u^2 + v^2)).
 - In-place [:] field assignment in _write_grid_fields to avoid per-step array
   reallocation.
-- Correct time-history ordering in _advance_time_history (bug fix: original
-  overwrote time N before copying to N-1).
+- Correct time-history ordering in _advance_time_history
 - Two new output fields: surface_water__x_velocity and surface_water__y_velocity
   (node-centred velocity components averaged from horizontal and vertical links
   respectively), enabling direct velocity comparison with RiverFlowDynamics_HLLC.
@@ -765,7 +766,7 @@ class RiverFlowDynamics(Component):
             self._adj_vlinks[v[1:, :].ravel(), 3] = v[:-1, :].ravel()  # S
 
     def _is_on_link_x(self, x):
-        """Boolean mask: x-coordinate aligns with raster link x-positions."""
+        """Return a boolean mask: x-coordinate aligns with raster link x-positions."""
         x = np.asarray(x, dtype=float)
         tol = 10.0 * np.finfo(float).eps * max(self._dx, self._dy)
         fx = ((x - self._x0) / self._dx) % 1.0
@@ -776,7 +777,7 @@ class RiverFlowDynamics(Component):
         )
 
     def _is_on_link_y(self, y):
-        """Boolean mask: y-coordinate aligns with raster link y-positions."""
+        """Return a boolean mask: y-coordinate aligns with raster link y-positions."""
         y = np.asarray(y, dtype=float)
         tol = 10.0 * np.finfo(float).eps * max(self._dx, self._dy)
         fy = ((y - self._y0) / self._dy) % 1.0
@@ -849,7 +850,7 @@ class RiverFlowDynamics(Component):
     # ── Semi-Lagrangian path-line tracing ─────────────────────────────────────
 
     def path_line_tracing(self):
-        """Semi-analytical path-line tracing (Pollock, 1988).
+        """Perform semi-analytical path-line tracing (Pollock, 1988).
 
         Traces particle trajectories backwards in time from each link face to find
         the departure point used for semi-Lagrangian velocity interpolation.
@@ -1160,7 +1161,7 @@ class RiverFlowDynamics(Component):
         self._a_links = np.where(self._wet_links, self._a_links, 1.0)
 
     def _advect_u_velocity(self):
-        """Semi-Lagrangian advection + viscosity for U (horizontal) velocity."""
+        """Calculate semi-Lagrangian advection and viscosity for the U (horizontal) velocity."""
         dx, dy = self.grid.dx, self.grid.dy
 
         # Particle start positions at active horizontal link centres
@@ -1244,7 +1245,7 @@ class RiverFlowDynamics(Component):
         )
 
     def _advect_v_velocity(self):
-        """Semi-Lagrangian advection + viscosity for V (vertical) velocity."""
+        """Calculate semi-Lagrangian advection and viscosity for the V (vertical) velocity."""
         dx, dy = self.grid.dx, self.grid.dy
 
         # Particle start positions at active vertical link centres

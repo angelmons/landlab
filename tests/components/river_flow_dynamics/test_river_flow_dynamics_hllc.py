@@ -1,15 +1,6 @@
 """
 Unit tests for landlab.components.river_flow_dynamics_hllc.RiverFlowDynamics_HLLC
 
-This suite is designed to be *production-grade* and broadly aligned with Landlab
-component testing conventions, while avoiding overly brittle numerical golden
-values. Where we compare to reference values, we do so with tolerances.
-
-This file is intentionally modeled after `test_river_flow_dynamics.py`, and it
-integrates the validation coverage from the historical script tests:
-- `test_hllc_component.py`
-- `test_new_capabilities.py`
-
 Notes
 -----
 * RiverFlowDynamics_HLLC is a hyperbolic finite-volume solver; its "exact" answers
@@ -510,7 +501,7 @@ def test_elapsed_time_accumulates():
 
 
 # -----------------------------------------------------------------------------
-# Outlet stage constraint (new capability)
+# Outlet stage constraint
 # -----------------------------------------------------------------------------
 
 
@@ -623,16 +614,17 @@ def test_exit_nodes_with_imposed_velocities():
 
 
 def _max_speed(grid: RasterModelGrid) -> float:
-    """Helper to compute maximum velocity magnitude in the grid."""
+    """Computes  maximum velocity magnitude in the grid."""
     u = grid.at_node["surface_water__x_velocity"]
     v = grid.at_node["surface_water__y_velocity"]
     return float(np.max(np.sqrt(u**2 + v**2)))
 
 
 @pytest.mark.parametrize("order", [1, 2])
-def test_wb1_flat_flow(order):
+def test_flat_flow(order):
     """
-    WB1: Flat bed with flow. The bed-slope source must be IDENTICALLY zero,
+    Performs the Flat bed with flow test.
+    The bed-slope source must be IDENTICALLY zero,
     regardless of the surface gradient or velocity field.
     """
     # Import the internal kernel module to probe _x_sweep directly
@@ -688,13 +680,14 @@ def test_wb1_flat_flow(order):
 
 
 @pytest.mark.parametrize("order", [1, 2])
-def test_wb2_slope_rest(order):
+def test_slope_rest(order):
     """
-    WB2: Lake at rest on a sloped bed.
+    Performs the Lake at rest on a sloped bed test.
     Velocity magnitude must stay at machine precision.
     """
     nrows, ncols, dx = 5, 60, 1.0
     grid = _make_grid(nrows, ncols, dx=dx)
+    grid.add_zeros("topographic__elevation", at="node")
 
     x = (np.arange(ncols) + 0.5) * dx
     z1d = 0.5 * (x - x.min()) / (x.max() - x.min())  # linear ramp 0→0.5
@@ -730,13 +723,14 @@ def test_wb2_slope_rest(order):
 
 
 @pytest.mark.parametrize("order", [1, 2])
-def test_wb3_slope_flow(order):
+def test_slope_flow(order):
     """
-    WB3: Sloped bed + flow. Sanity/stability guard.
+    Performs the Sloped bed + flow. Sanity/stability guard test.
     Ensures finite values and non-negative depth when flow traverses a slope.
     """
     nrows, ncols, dx = 5, 60, 1.0
     grid = _make_grid(nrows, ncols, dx=dx)
+    grid.add_zeros("topographic__elevation", at="node")
 
     x = (np.arange(ncols) + 0.5) * dx
     z1d = 0.3 * (x - x.min()) / (x.max() - x.min())
@@ -761,3 +755,190 @@ def test_wb3_slope_flow(order):
 
         assert np.all(np.isfinite(h)), "Depth became NaN/Inf"
         assert not np.any(h < -1e-9), "Depth became negative"
+
+
+def test_implicit_diffusion_closures():
+    """Tests the Smagorinsky and Elder diffusion block."""
+    grid = _make_grid(40, 40, dx=1.0)
+    grid.add_zeros("topographic__elevation", at="node")
+    grid.add_full("surface_water__depth", 1.0, at="node")
+
+    # Explicitly add the fields the component expects to find
+    grid.add_zeros("surface_water__x_velocity", at="node")
+    grid.add_zeros("surface_water__y_velocity", at="node")
+
+    # Force a shear layer in the INTERIOR (not on the boundary)
+    # Get the 2D view of the velocity field directly from the grid
+    u_2d = grid.at_node["surface_water__x_velocity"].reshape(grid.shape)
+
+    # Now you can use 2D indexing
+    u_2d[15:25, :] = 2.0  # High velocity jet in the middle
+
+    # Ensure the grid field is updated (if you used reshape, it's already a view)
+    grid.at_node["surface_water__x_velocity"][:] = u_2d.flatten()
+
+    comp = RiverFlowDynamics_HLLC(
+        grid,
+        mannings_n=0.02,
+        use_smagorinsky=True,
+        smagorinsky_cs=1.0,
+        use_elder=True,
+        elder_alpha=0.6,
+    )
+
+    # Manually inject the velocity jet into the component's internal state
+    # u = momentum / h (here h=1.0, so momentum == velocity)
+    u_2d = comp._u  # This is the 2D view of the component's internal velocity
+    u_2d[15:25, :] = 2.0
+    comp._hu[:] = comp._u * comp._h
+
+    # Now run the step; the diffusion solver will see the jet in self._hu
+    comp.run_one_step(dt=0.1)
+
+    nu_t = grid.at_node["surface_water__eddy_viscosity"]
+    nu_t_2d = nu_t.reshape(grid.shape)
+    interior_nu_t = nu_t_2d[1:-1, 1:-1]
+
+    assert np.any(interior_nu_t > 1e-8), f"Max nu_t across whole grid: {np.max(nu_t)}"
+
+
+def test_hllc_init_exceptions_and_edge_cases():
+    """Tests various ValueErrors and missing coverage in __init__."""
+    grid = _make_grid(5, 5, dx=1.0)
+    grid.add_zeros("topographic__elevation", at="node")
+    grid.add_full("surface_water__depth", 1.0, at="node")
+
+    # mannings_n wrong size
+    with pytest.raises(ValueError, match="mannings_n must be a scalar or a 1-D array"):
+        RiverFlowDynamics_HLLC(grid, mannings_n=np.array([0.01, 0.02]))
+
+    # invalid wall_edges
+    with pytest.raises(ValueError, match="Unknown wall_edges"):
+        RiverFlowDynamics_HLLC(grid, wall_edges={"bogus_edge"})
+
+    # fixed_entry_nodes without h_values
+    with pytest.raises(ValueError, match="entry_nodes_h_values is required"):
+        RiverFlowDynamics_HLLC(grid, fixed_entry_nodes=[0])
+
+    # fixed_exit_nodes without h_values or eta_values
+    with pytest.raises(
+        ValueError, match="Provide exit_nodes_h_values or exit_nodes_eta_values"
+    ):
+        RiverFlowDynamics_HLLC(grid, fixed_exit_nodes=[4])
+
+    # exit nodes mismatch lengths
+    with pytest.raises(ValueError, match="exit_nodes_h_values must match"):
+        RiverFlowDynamics_HLLC(grid, fixed_exit_nodes=[4, 9], exit_nodes_h_values=[1.0])
+    with pytest.raises(ValueError, match="exit_nodes_eta_values must match"):
+        RiverFlowDynamics_HLLC(
+            grid, fixed_exit_nodes=[4, 9], exit_nodes_eta_values=[1.0]
+        )
+    with pytest.raises(ValueError, match="exit_nodes_u_values must match"):
+        RiverFlowDynamics_HLLC(
+            grid,
+            fixed_exit_nodes=[4, 9],
+            exit_nodes_h_values=[1.0, 1.0],
+            exit_nodes_u_values=[0.5],
+        )
+    with pytest.raises(ValueError, match="exit_nodes_v_values must match"):
+        RiverFlowDynamics_HLLC(
+            grid,
+            fixed_exit_nodes=[4, 9],
+            exit_nodes_h_values=[1.0, 1.0],
+            exit_nodes_v_values=[0.5],
+        )
+
+
+def test_inflow_all_four_edges():
+    """Tests the right, top, and bottom edge inflow builder blocks."""
+    grid = _make_grid(5, 5, dx=1.0)
+    grid.add_zeros("topographic__elevation", at="node")
+    grid.add_full("surface_water__depth", 1.0, at="node")
+
+    # Pick one node on each of the four edges
+    entry_nodes = [
+        grid.nodes_at_left_edge[1],
+        grid.nodes_at_right_edge[1],
+        grid.nodes_at_bottom_edge[1],
+        grid.nodes_at_top_edge[1],
+    ]
+    comp = RiverFlowDynamics_HLLC(
+        grid,
+        fixed_entry_nodes=entry_nodes,
+        entry_nodes_h_values=[1.0, 1.0, 1.0, 1.0],
+        entry_nodes_u_values=[0.1, -0.1, 0.0, 0.0],
+        entry_nodes_v_values=[0.0, 0.0, 0.1, -0.1],
+    )
+    comp.run_one_step(dt=0.1)
+
+
+def test_fixed_exit_velocities_and_outlet_max_depth():
+    """Tests the WSE clamping branches for exit_u, exit_v, and outlet_max_depth."""
+    grid = _make_grid(5, 5, dx=1.0)
+    grid.add_zeros("topographic__elevation", at="node")
+    grid.add_full("surface_water__depth", 0.5, at="node")  # Below outlet_max_depth
+
+    exit_nodes = grid.nodes_at_right_edge
+    comp = RiverFlowDynamics_HLLC(
+        grid,
+        fixed_exit_nodes=exit_nodes,
+        exit_nodes_h_values=np.ones_like(exit_nodes) * 1.0,
+        exit_nodes_u_values=np.ones_like(exit_nodes) * 0.5,
+        exit_nodes_v_values=np.ones_like(exit_nodes) * 0.1,
+        outlet_max_depth=0.8,
+    )
+    # Step 1: Ramp inactive
+    comp.run_one_step(dt=0.1)
+
+    # Step 2: Raise depth to trigger outlet max depth clamp
+    grid.at_node["surface_water__depth"][:] = 1.0
+    comp.run_one_step(dt=0.1)
+
+
+def test_build_inflow_ghost_internal():
+    """Tests the internal _build_inflow_ghost logic directly for full/bogus modes."""
+    import landlab.components.river_flow_dynamics.river_flow_dynamics_hllc as hllc_module
+
+    h_int = np.array([1.0])
+    hu_int = np.array([0.5])
+    hv_int = np.array([0.0])
+    z = np.array([0.0])
+    g = 9.81
+
+    # Test full mode
+    spec_full = {
+        "mode": "full",
+        "h": np.array([1.0]),
+        "hu": np.array([1.0]),
+        "hv": np.array([0.0]),
+        "z": z,
+    }
+    hg, hug, hvg, zg = hllc_module._build_inflow_ghost(
+        spec_full, h_int, hu_int, hv_int, g, "left"
+    )
+    assert hg[0] == 1.0
+
+    # Test bogus mode exception
+    spec_bogus = {"mode": "bogus", "z": z}
+    with pytest.raises(ValueError, match="Unknown inflow mode: bogus"):
+        hllc_module._build_inflow_ghost(spec_bogus, h_int, hu_int, hv_int, g, "left")
+
+
+def test_muscl_order_2_dry_face():
+    """Tests the dry-face fallback block inside MUSCL _x_sweep."""
+    grid = _make_grid(5, 5, dx=1.0)
+    grid.add_zeros("topographic__elevation", at="node")
+    h = grid.add_zeros("surface_water__depth", at="node")
+    h[:10] = 0.5  # Half wet, half dry grid
+    comp = RiverFlowDynamics_HLLC(grid, order=2)
+    comp.run_one_step(dt=0.01)
+
+
+def test_cfl_dt_warning():
+    """Tests the user warning when dt > dt_cfl."""
+    grid = _make_grid(5, 5, dx=1.0)
+    grid.add_zeros("topographic__elevation", at="node")
+    grid.add_full("surface_water__depth", 1.0, at="node")
+    comp = RiverFlowDynamics_HLLC(grid)
+    with pytest.warns(UserWarning, match="exceeds CFL-stable"):
+        comp.run_one_step(dt=999.0)

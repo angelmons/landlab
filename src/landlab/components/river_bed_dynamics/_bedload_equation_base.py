@@ -99,7 +99,7 @@ class MPMEquation(BedloadEquation):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_MPM_style as _m
 
-        return _m.bedload_equation(rbd), None
+        return _m._compute_qb(rbd, _m.MeyerPeter_Muller), None
 
 
 class FLvBEquation(BedloadEquation):
@@ -122,7 +122,7 @@ class FLvBEquation(BedloadEquation):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_MPM_style as _m
 
-        return _m.bedload_equation(rbd), None
+        return _m._compute_qb(rbd, _m.FernandezLuque_VanBeek), None
 
 
 class WongAndParkerEquation(BedloadEquation):
@@ -145,7 +145,7 @@ class WongAndParkerEquation(BedloadEquation):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_MPM_style as _m
 
-        return _m.bedload_equation(rbd), None
+        return _m._compute_qb(rbd, _m.Wong_Parker), None
 
 
 class HuangEquation(BedloadEquation):
@@ -168,7 +168,7 @@ class HuangEquation(BedloadEquation):
         """Delegate to the underlying module-level function and return results."""
         from . import _bedload_eq_MPM_style as _m
 
-        return _m.bedload_equation(rbd), None
+        return _m._compute_qb(rbd, _m.Huang), None
 
 
 class Parker1990Equation(BedloadEquation):

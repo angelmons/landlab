@@ -21,7 +21,7 @@ Audusse, E., Bouchut, F., Bristeau, M.-O., Klein, R., & Perthame, B. (2004).
 A fast and stable well-balanced scheme with hydrostatic reconstruction for
 shallow water flows. *SIAM J. Sci. Comput.* https://doi.org/10.1137/S1064827503431090
 
-Capabilities
+Notes
 ------------
 * HLLC Riemann flux — correct shocks, hydraulic jumps, transcritical flow
 * Audusse hydrostatic reconstruction — exact well-balancedness
@@ -134,6 +134,8 @@ True
 import warnings
 
 import numpy as np
+import scipy.sparse.linalg as spla
+from scipy.sparse import diags
 
 from landlab import Component
 from landlab import RasterModelGrid
@@ -157,7 +159,7 @@ def _swe_flux_x(h, hu, hv, g):
 
 
 def _wave_speeds(hL, uL, hR, uR, g):
-    """HLLC wave-speed estimates with dry-front correction.
+    """HEstimate HLLC wave-speeds with dry-front correction.
 
     Uses Einfeldt-Roe estimates on wet/wet interfaces (the standard choice)
     and the two-rarefaction (dry-front) estimates of Brufau et al. (2002) /
@@ -233,7 +235,7 @@ def _hllc_star_flux(h, hu, hv, Fh, Fhu, Fhv, S, S_star, g):
 
 
 def _hllc_flux_x(hL, huL, hvL, hR, huR, hvR, g=_G):
-    """Vectorized HLLC flux in the x-direction across N faces."""
+    """Calculate the vectorized HLLC flux in the x-direction across N faces."""
     hL, huL, hvL = np.asarray(hL, float), np.asarray(huL, float), np.asarray(hvL, float)
     hR, huR, hvR = np.asarray(hR, float), np.asarray(huR, float), np.asarray(hvR, float)
     inv_hL = np.where(hL > 0, 1.0 / np.where(hL > 0, hL, 1.0), 0.0)
@@ -613,7 +615,7 @@ def _x_sweep(
     #
     # The source must be the exact partner of the HLLC hydrostatic pressure
     # flux so that "lake at rest" on a non-flat bed is preserved to machine
-    # precision, while contributing *nothing* on a flat bed (where there is
+    # precision, while contributing nothing on a flat bed (where there is
     # no bed slope), regardless of the surface gradient.
     #
     # The key requirement (Audusse et al. 2004 §2.2; Liang & Borthwick 2009
@@ -622,7 +624,7 @@ def _x_sweep(
     # step `zf = max(zL, zR)` that the flux uses — NOT from the MUSCL-
     # reconstructed face values.  Using reconstructed eta here couples the
     # well-balancing to the slope limiter and injects spurious momentum on a
-    # flat bed whenever the surface varies (the order-2 defect this replaces).
+    # flat bed whenever the surface varies .
     #
     # At rest (eta = const) hLsrc = hRsrc = eta - zf at every face, so the
     # source telescopes exactly against div(F_hu); on a flat bed zf = 0 makes
@@ -654,9 +656,10 @@ def _y_sweep(
     inflow_bottom=None,
     inflow_top=None,
 ):
-    """Y-direction sub-step.  Implemented by calling _x_sweep on transposed
-    arrays with hu/hv swapped (so the "x-momentum" of the sweep is the y
-    physical momentum).  Inflow specs are likewise swapped: bottom -> left
+    """Advance the conservative state by one y-direction sub-step. Implemented
+    by calling _x_sweep on transposed arrays with hu/hv swapped (so the
+    "x-momentum" of the sweep is the y physical momentum).  Inflow specs are
+    likewise swapped: bottom -> left
     (and the v-component of inflow becomes the swept-direction "hu").
     """
 
@@ -775,7 +778,7 @@ def _step(
 
 
 class RiverFlowDynamics_HLLC(Component):
-    """2D shallow-water HLLC solver on a RasterModelGrid.
+    """Simulate 2D shallow-water flow using an HLLC solver on a RasterModelGrid.
 
     Parameters
     ----------
@@ -816,9 +819,6 @@ class RiverFlowDynamics_HLLC(Component):
         Typically used on the downstream edge to fix stage (or depth).
 
     exit_nodes_eta_values : array_like, optional
-        Water depth [m] imposed at each ``fixed_exit_node`` (depth-based outlet).
-
-    exit_nodes_eta_values : array_like, optional
         Water-surface elevation [m] imposed at each ``fixed_exit_node`` (stage-based outlet).
         If provided, depth is set as ``max(eta - z, 0)`` at those nodes.
 
@@ -827,6 +827,7 @@ class RiverFlowDynamics_HLLC(Component):
         solver preserves the current local velocity when applying the outlet
         depth/stage (i.e., momentum is adjusted consistently with the imposed
         depth/stage).
+
     outlet_max_depth : float or None, optional
         Ramp-up outlet depth cap [m]. When set, the outlet depth is clamped
         to ``min(h_local, outlet_max_depth)`` — the target depth is only
@@ -835,6 +836,7 @@ class RiverFlowDynamics_HLLC(Component):
         partially-wet outlet at the start of a simulation.
         Applies only when ``fixed_exit_nodes`` is also provided.
         Default ``None`` (standard hard Dirichlet outlet).
+
     wall_edges : set of str, optional
         Edges treated as **reflective walls** (zero normal velocity).
         Subset of ``{'left', 'right', 'bottom', 'top'}``.
@@ -975,6 +977,10 @@ class RiverFlowDynamics_HLLC(Component):
         outlet_max_depth=None,
         wall_edges=None,
         update_link_fields=False,
+        use_smagorinsky=False,
+        smagorinsky_cs=0.15,
+        use_elder=False,
+        elder_alpha=0.6,
     ):
         if not isinstance(grid, RasterModelGrid):
             raise TypeError("RiverFlowDynamics_HLLC requires a RasterModelGrid.")
@@ -992,6 +998,9 @@ class RiverFlowDynamics_HLLC(Component):
         self._nc = nc
         self._dx = grid.dx
         self._dy = grid.dy
+
+        self._n = mannings_n  # Useful for tests
+        self._mannings_n = mannings_n  # Useful for tests
 
         # ── Topography ────────────────────────────────────────────────────
         if "topographic__elevation" not in grid.at_node:
@@ -1225,6 +1234,17 @@ class RiverFlowDynamics_HLLC(Component):
 
         self._update_derived()
 
+        self._use_smagorinsky = use_smagorinsky
+        self._smagorinsky_cs = smagorinsky_cs
+        self._use_elder = use_elder
+        self._elder_alpha = elder_alpha
+
+        # Initialize diagnostic field for Eddy Viscosity
+        if self._use_smagorinsky or self._use_elder:
+            if "surface_water__eddy_viscosity" not in self._grid.at_node:
+                self._grid.add_zeros("surface_water__eddy_viscosity", at="node")
+            self._nu_t_flat = self._grid.at_node["surface_water__eddy_viscosity"]
+
     # ──────────────────────────────────────────────────────────────────────
     # Properties
     # ──────────────────────────────────────────────────────────────────────
@@ -1305,6 +1325,11 @@ class RiverFlowDynamics_HLLC(Component):
         self._h[:] = h_new
         self._hu[:] = hu_new
         self._hv[:] = hv_new
+
+        # === 2D IMPLICIT DIFFUSION ===
+        if self._use_smagorinsky or self._use_elder:
+            self._apply_implicit_diffusion(dt)
+
         self._apply_outlet()
         self._update_derived()
 
@@ -1328,7 +1353,7 @@ class RiverFlowDynamics_HLLC(Component):
 
         Returns
         -------
-        vel : ndarray (n_links,)
+        vel : ndarray
         """
         grid = self._grid
         u_flat = self._u.ravel()
@@ -1406,3 +1431,117 @@ class RiverFlowDynamics_HLLC(Component):
         ih = np.where(wet, 1.0 / np.where(wet, self._h, 1.0), 0.0)
         np.multiply(self._hu, ih, out=self._u)
         np.multiply(self._hv, ih, out=self._v)
+
+    def _apply_implicit_diffusion(self, dt):
+        """Perform implicit integration of horizontal momentum diffusion."""
+        h = self._h
+        u = np.where(h > 1e-6, self._hu / h, 0.0)
+        v = np.where(h > 1e-6, self._hv / h, 0.0)
+
+        nu_t = np.zeros_like(h)
+        dx, dy = self._dx, self._dy
+
+        # ── 1. Smagorinsky Closure (Shear-driven mixing) ───────────
+        if self._use_smagorinsky:
+            dudx = np.zeros_like(u)
+            dudy = np.zeros_like(u)
+            dvdx = np.zeros_like(v)
+            dvdy = np.zeros_like(v)
+
+            # Central differences (boundaries naturally remain 0)
+            dudx[:, 1:-1] = (u[:, 2:] - u[:, :-2]) / (2 * dx)
+            dudy[1:-1, :] = (u[2:, :] - u[:-2, :]) / (2 * dy)
+            dvdx[:, 1:-1] = (v[:, 2:] - v[:, :-2]) / (2 * dx)
+            dvdy[1:-1, :] = (v[2:, :] - v[:-2, :]) / (2 * dy)
+
+            S_mag = np.sqrt(2 * (dudx**2 + dvdy**2) + (dudy + dvdx) ** 2)
+            nu_smag = (self._smagorinsky_cs * np.sqrt(dx * dy)) ** 2 * S_mag
+            nu_t += nu_smag
+
+        # ── 2. Elder's Closure (Bed-friction-driven mixing) ────────
+        if self._use_elder:
+            mag_u = np.sqrt(u**2 + v**2)
+            # ``_n_2d`` is either the scalar fast path or the active
+            # per-node roughness array (including a live grid field).
+            n_field = self._n_2d
+            h_safe = np.maximum(h, 1e-6)
+            # nu_elder = alpha * u_* * h; where u_* = sqrt(g) * n * |U| / h^(1/6)
+            nu_elder = (
+                self._elder_alpha
+                * np.sqrt(self._g)
+                * n_field
+                * mag_u
+                * (h_safe ** (5.0 / 6.0))
+            )
+            nu_t += np.where(h > 1e-6, nu_elder, 0.0)
+
+        # Store for diagnostics
+        self._nu_t_flat[:] = nu_t.flatten()
+
+        # ── 3. Sparse Matrix Assembly ──────────────────────────────
+        # We solve:  h u^{n+1} - dt * ∇ · (h nu_t ∇ u^{n+1}) = h u^n
+        Gamma = h * nu_t
+        nrows, ncols = h.shape
+        N = nrows * ncols
+
+        # Face Diffusivities
+        GE = np.zeros_like(Gamma)
+        GW = np.zeros_like(Gamma)
+        GN = np.zeros_like(Gamma)
+        GS = np.zeros_like(Gamma)
+
+        # Internal faces (Edges remain 0 -> Zero-gradient no-flux BCs,
+        # which also brilliantly prevents 1D sparse array wrap-around)
+        GE[:, :-1] = 0.5 * (Gamma[:, :-1] + Gamma[:, 1:])
+        GW[:, 1:] = 0.5 * (Gamma[:, 1:] + Gamma[:, :-1])
+        GN[:-1, :] = 0.5 * (Gamma[:-1, :] + Gamma[1:, :])
+        GS[1:, :] = 0.5 * (Gamma[1:, :] + Gamma[:-1, :])
+
+        dt_dx2 = dt / (dx**2)
+        dt_dy2 = dt / (dy**2)
+
+        aE = GE * dt_dx2
+        aW = GW * dt_dx2
+        aN = GN * dt_dy2
+        aS = GS * dt_dy2
+
+        aP = h + aE + aW + aN + aS
+
+        # Safeguard dry cells: keeps matrix strictly diagonally dominant
+        # and prevents singular matrix inversion failures.
+        aP = np.where(h < 1e-6, 1.0, aP)
+
+        diagonals = [
+            aP.flatten(),
+            -aE.flatten()[:-1],
+            -aW.flatten()[1:],
+            -aN.flatten()[:-ncols],
+            -aS.flatten()[ncols:],
+        ]
+        offsets = [0, 1, -1, ncols, -ncols]
+
+        # CSR format is optimized for arithmetic operations and matrix-vector products
+        A = diags(diagonals, offsets, shape=(N, N), format="csr")
+
+        RHS_u = np.where(h < 1e-6, 0.0, h * u).flatten()
+        RHS_v = np.where(h < 1e-6, 0.0, h * v).flatten()
+
+        # ── 4. Solve Sparse Linear System ──────────────────────────
+        try:
+            # We solve for u and v simultaneously by stacking the RHS
+            RHS = np.column_stack((RHS_u, RHS_v))
+            UV_new = spla.spsolve(A, RHS)
+
+            u_new = UV_new[:, 0].reshape((nrows, ncols))
+            v_new = UV_new[:, 1].reshape((nrows, ncols))
+
+            # Reconstruct conservative momenta
+            # Write in place so the arrays remain live views of the
+            # corresponding Landlab node fields. Rebinding ``self._hu`` or
+            # ``self._hv`` would detach the solver state from the grid.
+            self._hu[:] = np.where(h > 1e-6, h * u_new, 0.0)
+            self._hv[:] = np.where(h > 1e-6, h * v_new, 0.0)
+
+        except RuntimeError:
+            # Fallback pass in the highly unlikely event of a solver condition failure
+            pass

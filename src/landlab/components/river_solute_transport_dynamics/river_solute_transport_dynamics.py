@@ -220,7 +220,7 @@ class RiverSoluteTransportDynamics(Component):
             "optional": False,
             "units": "m/s",
             "mapping": "link",
-            "doc": ("Link-parallel advection velocity used by AdvectionSolverTVD."),
+            "doc": "Link-parallel advection velocity magnitude",
         },
     }
 
@@ -538,7 +538,12 @@ class RiverSoluteTransportDynamics(Component):
             has_sorption = np.asarray(lam_hat > 0)
             if np.any(has_sorption):
                 if np.ndim(has_sorption) == 0:
-                    C_sed[core] = num_sed[core] / den_sed[core]
+                    # ``den_sed`` is scalar when ``lam_hat`` is scalar,
+                    # but is a node array for spatially varying sorption.
+                    if np.ndim(den_sed) == 0:
+                        C_sed[core] = num_sed[core] / den_sed
+                    else:
+                        C_sed[core] = num_sed[core] / den_sed[core]
                 else:
                     mask = (
                         np.isin(np.arange(self._grid.number_of_nodes), core)
