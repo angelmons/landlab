@@ -488,7 +488,7 @@ Now, we will consider the hydraulics radius
 
 So, there is an important difference between the two ways of calculating it.
 
-Architecture Overview - New compared to GMD paper
+Architecture overview
 -------------------------------------------------
 The component is structured around four pluggable subsystems, each implemented
 as a standalone class that reads and writes state on the ``RiverBedDynamics``
@@ -499,7 +499,7 @@ Bedload equation registry (``_bedload_equation_base.py``)
     The ``bedload_equation`` parameter selects a concrete subclass of
     ``BedloadEquation``.  All equations expose a uniform ``calculate(rbd)``
     interface, so adding a new formula requires only subclassing and
-    registration — no changes to the core.
+    registration  -  no changes to the core.
 
     Available keys: ``"MPM"``, ``"FLvB"``, ``"WongAndParker"``, ``"Huang"``,
     ``"Parker1990"``, ``"WilcockAndCrowe"``.
@@ -518,18 +518,18 @@ GSD evolver (``_gsd_evolver.py``)
     fractional Exner equation for bed surface sorting.  The spatial flux
     scheme is selectable via ``gsd_advection_scheme``:
 
-    * ``"upwind"`` (default) — blended upwind / Lax–Wendroff, first-order.
-    * ``"tvd_minmod"`` — TVD minmod-limited, second-order in smooth regions.
+    * ``"upwind"`` (default)  -  blended upwind / Lax-Wendroff, first-order.
+    * ``"tvd_minmod"``  -  TVD minmod-limited, second-order in smooth regions.
 
 Time integrators for the Exner equation (``RiverBedDynamics.py``)
     Controlled by ``time_stepping``:
 
-    * ``"euler"`` (default) — explicit first-order forward Euler.  Stable
+    * ``"euler"`` (default)  -  explicit first-order forward Euler.  Stable
       only for ``dt ≤ dt_CFL``; cheap (one transport evaluation per step).
-    * ``"rk2"`` — Heun's predictor-corrector (second-order in time).  Costs
+    * ``"rk2"``  -  Heun's predictor-corrector (second-order in time).  Costs
       two transport evaluations per step but can use ~2× larger ``dt`` for
       the same accuracy.
-    * ``"implicit"`` — linearised backward Euler.  Unconditionally stable;
+    * ``"implicit"``  -  linearised backward Euler.  Unconditionally stable;
       allows ``dt`` far beyond the explicit CFL limit.  Costs one Jacobian
       computation (``O(n_core)`` transport evaluations) and a sparse LU
       solve per step.  Best for long morphodynamic simulations where
@@ -544,7 +544,7 @@ Morphodynamic subcycling (``morfac``)
     ``morfac`` flow steps worth of evolution in a single calculation.
 
     This exploits the timescale separation between flow (seconds) and
-    morphology (hours–days): updating the bed every ``morfac`` flow
+    morphology (hours-days): updating the bed every ``morfac`` flow
     steps is physically justified because the transport field barely
     changes over that interval.
 
@@ -559,10 +559,9 @@ Slope limiter / avalanching
     Jacobi relaxation that redistributes elevation between the two
     end-nodes.  Fixed and boundary nodes are excluded.
 
-New Parameters
--------------------------------------
-The following parameters were added after the initial release and are not
-described in the original ``__init__`` docstring above:
+Selected parameters
+-------------------
+The following parameters control optional model behavior:
 
 ``time_stepping`` : ``{"euler", "rk2", "implicit"}``, default ``"euler"``
     Exner time-integration scheme (see above).
@@ -585,9 +584,9 @@ described in the original ``__init__`` docstring above:
     Residual threshold for the GSD normalisation warning.
 
 ``gsd_n_minus_1`` : bool, default ``False``
-    If ``True`` (default), evolve only the first ``n_grains − 1``
+    If ``True`` (default), evolve only the first ``n_grains - 1``
     fractions explicitly and recover the last as
-    ``f_last = 1 − Σ(rest)``.  This eliminates the drift source
+    ``f_last = 1 - Σ(rest)``.  This eliminates the drift source
     that makes renormalisation necessary.
 
 ``use_bed_diffusion`` : bool, default ``False``
@@ -630,8 +629,8 @@ described in the original ``__init__`` docstring above:
 ``slope_limiter_max_iterations`` : int, default ``10``
     Maximum Jacobi sweeps per step for the slope limiter.
 
-Diagnostic Attributes Added
-------------------------------------------
+Diagnostic attributes
+---------------------
 ``_bed_surf__gsd_residual_max`` : float
     Maximum ``|Σf_i - 1|`` across all links before the last renormalisation.
 
@@ -642,21 +641,21 @@ References
 ----------
 Toro-Escobar, C. M., Paola, C., & Parker, G. (1996). Transfer function for
 the deposition of poorly sorted gravel in response to streambed aggradation.
-Journal of Hydraulic Research, 34(1), 35–53.
+Journal of Hydraulic Research, 34(1), 35-53.
 
 Talmon, A. M., Struiksma, N., & Van Mierlo, M. C. L. M. (1995). Laboratory
 measurements of the direction of sediment transport on transverse alluvial-bed
-slopes. Journal of Hydraulic Research, 33(4), 495–517.
+slopes. Journal of Hydraulic Research, 33(4), 495-517.
 
 Soni, J. P. (1981). Laboratory study of aggradation in alluvial channels.
-Journal of Hydrology, 49(1–2), 87–106.
+Journal of Hydrology, 49(1-2), 87-106.
 
 Seal, R., Paola, C., Parker, G., Southard, J. B., & Wilcock, P. R. (1997).
 Experiments on downstream fining of gravel: I. Narrow-channel runs.
-Journal of Hydraulic Engineering, 123(10), 874–884.
+Journal of Hydraulic Engineering, 123(10), 874-884.
 
 Roelvink, J. A. (2006). Coastal morphodynamic evolution techniques.
-Coastal Engineering, 53(2–3), 277–287.
+Coastal Engineering, 53(2-3), 277-287.
 https://doi.org/10.1016/j.coastaleng.2005.10.015
 
 """
@@ -673,7 +672,7 @@ from . import _stratigraphy as stratigraphy
 
 
 class RiverBedDynamics(Component):
-    """Predicts the evolution of a river bed.
+    """Predict the evolution of a river bed.
 
     Landlab component that predicts the evolution of a river bed
     considering changes in elevation and grain size distribution in response to
@@ -693,8 +692,8 @@ class RiverBedDynamics(Component):
     Monsalve, A. D., Anderson, S. R., Gasparini, N. M., and Yager, E. M.:
     RiverBedDynamics v1.0: a Landlab component for computing
     two-dimensional sediment transport and river bed evolution,
-    Geosci. Model Dev., 18, 3427–3451,
-    https://doi.org/10.5194/gmd-18-3427-2025, 2025.
+    Geosci. Model Dev., 18, 3427-3451,
+    https : //doi.org/10.5194/gmd-18-3427-2025, 2025
 
     Not required but recommended
 
@@ -716,7 +715,7 @@ class RiverBedDynamics(Component):
 
     Meyer-Peter, E. and Müller, R., 1948, Formulas for Bed-Load Transport,
     Proceedings, 2nd Congress, International Association of Hydraulic Research,
-    Stockholm: 39-64.
+    Stockholm : 39-64
 
     Fernandez Luque, R. and R. van Beek, 1976, Erosion and transport of
     bedload sediment, Journal of Hydraulic Research, 14(2): 127-144.
@@ -840,7 +839,7 @@ class RiverBedDynamics(Component):
         water_temperature=20.0,
         variable_fluid_properties=False,
     ):
-        """Calculates the evolution of a river bed based on bed load transport
+        """Calculate the evolution of a river bed based on bedload transport
         and fractional rates on links. An external flow hydraulics solver, such
         as OverlandFlow, is required to predict flow variables in time and space.
         The shear stress used in sediment transport equations takes into account
@@ -860,7 +859,7 @@ class RiverBedDynamics(Component):
             Fluid density. Defaults to the density of water at 1000 kg/m^3.
         rho_s : float, optional
             Sediment density. Defaults to sediment density of 2650 kg/m^3.
-        bedload_equation : String, optional
+        bedload_equation : str, optional
             Selects the bedload transport equation. Options include:
 
             * ``'MPM'`` for Meyer Peter and Muller,
@@ -947,18 +946,18 @@ class RiverBedDynamics(Component):
             Controls how the diffusion coefficient D [m²/s] is determined.
             Options:
 
-            * ``'nonlinear'`` — D = abs(qb) / μ, where qb is the local bedload
+            * ``'nonlinear'``  -  D = abs(qb) / μ, where qb is the local bedload
               transport rate per unit width and μ is the Talmon friction
               parameter ``bed_diffusion_mu``. D is zero wherever there is no
               transport, which is physically consistent.
-            * ``'constant'`` — D is the fixed value ``bed_diffusion_coeff``
+            * ``'constant'``  -  D is the fixed value ``bed_diffusion_coeff``
               everywhere (simpler, but requires empirical calibration).
 
             Default is ``'nonlinear'``.
         bed_diffusion_mu : float, optional
             Talmon friction parameter μ used when ``bed_diffusion_mode='nonlinear'``.
             Controls the strength of gravitational diffusion relative to the
-            bedload transport rate. Typical range: 0.3–1.5 for gravel beds;
+            bedload transport rate. Typical range: 0.3-1.5 for gravel beds;
             smaller values produce stronger smoothing. Default is 0.5.
         bed_diffusion_coeff : float, optional
             Constant diffusion coefficient D [m²/s] used when
@@ -981,21 +980,21 @@ class RiverBedDynamics(Component):
         time_stepping : str, optional
             Time-integration scheme for the advective Exner equation.
 
-            * ``"euler"`` (default) — explicit first-order forward Euler.
-            * ``"rk2"`` — Heun's method (explicit RK2 / predictor-corrector).
+            * ``"euler"`` (default)  -  explicit first-order forward Euler.
+            * ``"rk2"``  -  Heun's method (explicit RK2 / predictor-corrector).
               The hydraulics (shear stress, water depth) are held fixed during
               the two-stage update; only the bed elevation changes between
-              stages.  Second-order accurate in time — halving ``dt`` quarters
+              stages.  Second-order accurate in time  -  halving ``dt`` quarters
               the elevation error.  Costs two bedload evaluations per step but
               can use ~2× the stable ``dt``, so net cost is similar to Euler.
         gsd_advection_scheme : str, optional
             Spatial discretisation for the fractional bedload flux divergence
             inside the GSD evolution step (Toro-Escobar equation).
 
-            * ``"upwind"`` (default) — blended upwind / Lax–Wendroff scheme
+            * ``"upwind"`` (default)  -  blended upwind / Lax-Wendroff scheme
               controlled by the ``alpha`` parameter.  Stable for all transport
               directions but numerically diffusive at GSD fronts.
-            * ``"tvd_minmod"`` — TVD-limited scheme using the minmod limiter.
+            * ``"tvd_minmod"``  -  TVD-limited scheme using the minmod limiter.
               Second-order accurate in smooth regions; reverts to first-order
               upwind at discontinuities (sharp GSD fronts).  Reduces numerical
               smearing without introducing spurious oscillations.
@@ -1008,9 +1007,9 @@ class RiverBedDynamics(Component):
             Threshold for the GSD residual warning (default ``1e-3``).
             Residuals below this value are considered normal round-off.
         gsd_n_minus_1 : bool, optional
-            If ``True`` (default), evolve only the first ``n_grains − 1``
+            If ``True`` (default), evolve only the first ``n_grains - 1``
             fractions explicitly and recover the last as
-            ``f_last = 1 − Σ(rest)``.  This eliminates the drift source
+            ``f_last = 1 - Σ(rest)``.  This eliminates the drift source
             that makes renormalisation necessary.
         morfac : int, optional
             Morphodynamic subcycling factor.  When ``morfac > 1``,
@@ -1042,7 +1041,7 @@ class RiverBedDynamics(Component):
             Maximum number of iterative sweeps for the slope limiter per
             time step.  Each sweep resolves all currently oversteep links
             simultaneously (Jacobi relaxation).  Convergence typically
-            requires 2–5 iterations.  Default is 10.
+            requires 2-5 iterations.  Default is 10.
         """
         super().__init__(grid)
 
@@ -1067,7 +1066,7 @@ class RiverBedDynamics(Component):
             self._mu = water_viscosity(T)
         else:
             # Backward-compatible: scalar constants, mu defaults to 20 °C value
-            self._mu = water_viscosity(20.0)  # scalar — only used for Re_s
+            self._mu = water_viscosity(20.0)  # scalar  -  only used for Re_s
         # end of water temperature effects
 
         self._rho_s = rho_s
@@ -1587,10 +1586,12 @@ class RiverBedDynamics(Component):
 
     @property
     def water_density_link(self) -> np.ndarray:
+        """Return water density at grid links."""
         return np.broadcast_to(np.asarray(self._rho), (self._grid.number_of_links,))
 
     @property
     def water_dynamic_viscosity_link(self) -> np.ndarray:
+        """Return dynamic viscosity at grid links."""
         return np.broadcast_to(np.asarray(self._mu), (self._grid.number_of_links,))
 
     def shear_stress(self):
@@ -1598,10 +1599,10 @@ class RiverBedDynamics(Component):
 
         Results are stored on the component as:
 
-        * ``_dz_ds`` — bed-slope gradient [m m⁻¹]
-        * ``_u`` — link velocity [m s⁻¹]
-        * ``_shear_stress`` — signed shear stress [Pa]
-        * ``_surface_water__shear_stress_link`` — absolute value [Pa]
+        * ``_dz_ds``  -  bed-slope gradient [m m⁻¹]
+        * ``_u``  -  link velocity [m s⁻¹]
+        * ``_shear_stress``  -  signed shear stress [Pa]
+        * ``_surface_water__shear_stress_link``  -  absolute value [Pa]
 
         After the calculator returns, if ``depth_threshold > 0`` this method
         zeroes shear stress at any link whose water depth is below the
@@ -1609,7 +1610,7 @@ class RiverBedDynamics(Component):
         Ownership is explicit: :class:`ShearStressCalculator` handles only
         the physics; this method applies the transport mask.
 
-        See :class:`ShearStressCalculator` for the full formulation.
+        See : class:`ShearStressCalculator` for the full formulation
         """
         self._shear_calc.calculate(self)
 
@@ -1621,7 +1622,7 @@ class RiverBedDynamics(Component):
             self._surface_water__shear_stress_link[dry] = 0.0
 
     def bedload_equation(self):
-        """Dispatch to the active bedload equation via the Phase-3A registry.
+        """Dispatch to the active bedload equation through the registry.
 
         Calls ``self._bedload_eq.calculate(self)`` and stores the results on
         the component.  For equations that resolve grain fractions (Parker 1990,
@@ -1635,7 +1636,7 @@ class RiverBedDynamics(Component):
             self._sed_transp__bedload_gsd_link = qb_gsd
 
     def calculate_net_bedload(self):
-        """Calculates the net volumetric bedload coming from all links (m2/s)
+        """Calculate the net volumetric bedload from all links (m2/s)
         onto nodes (m3/s).
 
         This method takes the volumetric bedload entering and exiting through a
@@ -1796,7 +1797,7 @@ class RiverBedDynamics(Component):
         zero columns in the Jacobian (their elevation is fixed by BCs).
 
         The matrix is returned in CSR format so it can be fed directly
-        to :func:`scipy.sparse.linalg.spsolve` in Phase 5.2.
+        to : func:`scipy.sparse.linalg.spsolve` in sparse-solver implementation
 
         Parameters
         ----------
@@ -1814,7 +1815,7 @@ class RiverBedDynamics(Component):
         Notes
         -----
         Cost is O(n_core_nodes) transport evaluations.  For a 100×100 grid
-        with ~9 800 core nodes this is expensive (~seconds); Phase 5.2
+        with about 9,800 core nodes this is expensive; the sparse solve
         exploits the sparsity pattern to avoid the full column-by-column
         sweep in the implicit solver.
         """
@@ -1887,7 +1888,7 @@ class RiverBedDynamics(Component):
         and delta_z = z^{n+1} - z^n.
 
         Boundary rows are replaced by identity rows so that the solver
-        returns :math:`\\delta z = 0` at every fixed/closed/outlet node.
+        returns : math:`\\delta z = 0` at every fixed/closed/outlet node
 
         Parameters
         ----------
@@ -1900,7 +1901,7 @@ class RiverBedDynamics(Component):
         -------
         A : scipy.sparse.csr_matrix
             Left-hand side matrix, shape ``(n, n)``.
-        b : ndarray, shape (n,)
+        b : ndarray
             Right-hand side vector [m].
         """
         import scipy.sparse as sp
@@ -1968,17 +1969,17 @@ class RiverBedDynamics(Component):
         self._grid["node"]["topographic__elevation"] = z
 
     def update_bed_elevation(self):
-        """Applies the Exner equation and boundary conditions to predict
+        """Apply the Exner equation and boundary conditions to predict
         the change in bed surface elevation.
 
         The time-integration scheme is controlled by ``time_stepping``:
 
-        ``"euler"`` (default) — first-order forward Euler::
+        ``"euler"`` (default)  -  first-order forward Euler::
 
             (1 - λp) ∂z/∂t = - ∇·q_b
             Z_{t+1} = Z_t - Δt · ΔQb / ((1 - λp) · A)
 
-        ``"rk2"`` — Heun's predictor-corrector (second-order)::
+        ``"rk2"``  -  Heun's predictor-corrector (second-order)::
 
             k1 = dz/dt evaluated at z^n (current bedload rates)
             z* = z^n + dt · k1          (predictor, with BCs)
@@ -1986,7 +1987,7 @@ class RiverBedDynamics(Component):
             k2 = dz/dt evaluated at z*
             z^{n+1} = z^n + dt/2 · (k1 + k2)  (corrector, with BCs)
 
-        ``"implicit"`` — linearised backward Euler (unconditionally stable)::
+        ``"implicit"``  -  linearised backward Euler (unconditionally stable)::
 
             (I - dt · J) · δz = dt · f(z^n)
             z^{n+1} = z^n + δz
@@ -2005,14 +2006,14 @@ class RiverBedDynamics(Component):
         z0 = z.copy()
         dt = self._grid._dt
 
-        # -- Advective CFL check (Phase 2.2) --------------------------------
+        # -- Advective CFL check -------------------------------------------
         if self._check_advective_cfl and not self._adaptive_dt:
             import warnings
 
             dt_safe = self.calc_max_stable_dt_advective(safety=1.0)
             if dt_safe < dt:
                 warnings.warn(
-                    f"Advective Exner CFL = {dt / dt_safe:.2f} > 1 — solution "
+                    f"Advective Exner CFL = {dt / dt_safe:.2f} > 1  -  solution "
                     f"may be unstable. Reduce dt to ≤ {dt_safe:.4g} s "
                     f"(current dt = {dt:.4g} s).",
                     UserWarning,
@@ -2029,7 +2030,7 @@ class RiverBedDynamics(Component):
 
         elif self._time_stepping == "rk2":
             # ── Heun's method (RK2) ──────────────────────────────────────── #
-            # Stage 1 — k1 at z^n (bedload already computed for this step)
+            # Stage 1  -  k1 at z^n (bedload already computed for this step)
             k1 = self._exner_rhs()  # dz/dt at z^n  [m/s]
 
             # Predictor: advance z to z* and apply BCs
@@ -2037,7 +2038,7 @@ class RiverBedDynamics(Component):
             dz_pred = dt * k1
             self._apply_elevation_bcs(z_star, z0, dz_pred)
 
-            # Stage 2 — k2: recompute bedload at predictor elevation z*
+            # Stage 2  -  k2: recompute bedload at predictor elevation z*
             # Write z* into the grid so shear_stress / bedload can read it
             self._grid["node"]["topographic__elevation"][:] = z_star
             self._grid["link"]["topographic__elevation"][:] = (
@@ -2148,7 +2149,7 @@ class RiverBedDynamics(Component):
         return dz
 
     def bed_diffusion(self):
-        """Computes the gravitational diffusion correction to bed elevation.
+        """Compute the gravitational diffusion correction to bed elevation.
 
         Evaluates the diffusive term of the extended Exner equation::
 
@@ -2165,7 +2166,7 @@ class RiverBedDynamics(Component):
         2. Diffusion coefficient at every link [m² s⁻¹]:
 
            * *nonlinear* mode: ``D = |qb| / μ``
-             (Talmon et al. 1995 — larger transport → stronger smoothing)
+             (Talmon et al. 1995  -  larger transport → stronger smoothing)
            * *constant* mode: ``D = bed_diffusion_coeff`` everywhere
 
         3. Diffusive sediment flux at links [m² s⁻¹]:
@@ -2215,7 +2216,7 @@ class RiverBedDynamics(Component):
             )
         else:
             # Constant diffusion coefficient
-            # Reuse scratch — fill every element so np.empty is safe
+            # Reuse scratch  -  fill every element so np.empty is safe
             self._scratch_D_link[:] = self._bed_diffusion_coeff
             D_link = self._scratch_D_link
 
@@ -2231,7 +2232,7 @@ class RiverBedDynamics(Component):
                 cfl = dt / dt_cfl
                 if cfl > 1.0:
                     warnings.warn(
-                        f"Diffusive CFL = {cfl:.2f} > 1 — solution may be "
+                        f"Diffusive CFL = {cfl:.2f} > 1  -  solution may be "
                         f"unstable. Reduce dt to ≤ {dt_cfl:.4g} s "
                         f"(current dt = {dt:.4g} s), or decrease "
                         f"bed_diffusion_mu to lower D.",
@@ -2241,7 +2242,7 @@ class RiverBedDynamics(Component):
 
         # -- 4. Diffusive flux at links and its divergence at nodes ---------
         #   q_diff  [m²/s]:  D · ∇z
-        #   div_diff [m/s]:  ∇·(D · ∇z)  — Landlab accounts for cell area
+        #   div_diff [m/s]:  ∇·(D · ∇z)   -  Landlab accounts for cell area
         q_diff = D_link * grad_z
         div_diff = self._grid.calc_flux_div_at_node(q_diff)
 
@@ -2260,7 +2261,7 @@ class RiverBedDynamics(Component):
         total elevation change across all nodes sums to zero.
 
         Fixed-elevation nodes (outlet, closed, user-specified) are excluded
-        from the redistribution — they act as rigid walls.
+        from the redistribution  -  they act as rigid walls.
 
         Multiple Jacobi sweeps are performed until either no oversteep links
         remain or ``slope_limiter_max_iterations`` is reached.  The number
@@ -2277,9 +2278,9 @@ class RiverBedDynamics(Component):
         The Jacobi (simultaneous) relaxation updates all oversteep links in
         parallel, using ``np.add.at`` for safe accumulation when multiple
         links share a node.  This can leave residual oversteepness after a
-        single sweep (unlike Gauss–Seidel), but convergence is guaranteed
+        single sweep (unlike Gauss-Seidel), but convergence is guaranteed
         because each sweep strictly reduces the maximum excess slope.  In
-        practice, gravel beds converge in 2–5 iterations.
+        practice, gravel beds converge in 2-5 iterations.
         """
         g = self._grid
         z = g.at_node["topographic__elevation"]
@@ -2300,8 +2301,8 @@ class RiverBedDynamics(Component):
         movable = np.ones(g.number_of_nodes, dtype=bool)
         movable[fixed_nodes] = False
 
-        tail = g.node_at_link_tail  # (n_links,) — one end of each link
-        head = g.node_at_link_head  # (n_links,) — other end
+        tail = g.node_at_link_tail  # (n_links,)  -  one end of each link
+        head = g.node_at_link_head  # (n_links,)  -  other end
 
         for iteration in range(self._slope_limiter_max_iterations):
             # Link lengths (dx or dy depending on orientation)
@@ -2310,7 +2311,7 @@ class RiverBedDynamics(Component):
             slope = np.abs(dz) / link_len
 
             oversteep = slope > tan_crit
-            # Exclude boundary links — their slopes are not physical
+            # Exclude boundary links  -  their slopes are not physical
             oversteep[self._boundary_links] = False
 
             if not np.any(oversteep):
@@ -2348,19 +2349,19 @@ class RiverBedDynamics(Component):
     def update_bed_surf_gsd(self):
         """Update the bed surface GSD via the Toro-Escobar fractional Exner equation.
 
-        Delegates to :class:`~._gsd_evolver.ToroEscobarEvolver` (Phase 3C).
+        Delegate to :class:`~._gsd_evolver.ToroEscobarEvolver`.
         Results written to the component:
 
-        * ``_bed_surf__gsd_link`` — updated surface GSD at links
-        * ``_bed_surf__gsd_node`` — updated surface GSD at nodes
-        * ``_topogr__elev_orig_link`` — updated reference elevation
+        * ``_bed_surf__gsd_link``  -  updated surface GSD at links
+        * ``_bed_surf__gsd_node``  -  updated surface GSD at nodes
+        * ``_topogr__elev_orig_link``  -  updated reference elevation
 
-        See :class:`~._gsd_evolver.ToroEscobarEvolver` for the full algorithm.
+        See : class:`~._gsd_evolver.ToroEscobarEvolver` for the full algorithm
         """
         self._gsd_evolver.evolve(self)
 
     def update_bed_surf_properties(self):
-        """Calculates the updated GSD properties"""
+        """Calculate the updated GSD properties"""
 
         self._bed_surf__median_size_link = self.calculate_DX(
             self._bed_surf__gsd_link, 0.5
@@ -2423,7 +2424,7 @@ class RiverBedDynamics(Component):
         return 2**gs_Psi_scale_DX
 
     def calculate_gsd_geo_mean_and_geo_std(self, gs_D_equiv_freq):
-        """Calculates the geometric mean and standard deviation in links or nodes
+        """Calculate the geometric mean and standard deviation at links or nodes
         depending on the input"""
 
         # Use cached Psi arrays (computed once in _cache_topology).

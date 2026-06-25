@@ -1,5 +1,5 @@
 """
-Implements a series of functions to create and/or initialize the required
+Create and initialize grain-size-distribution fields required by RiverBedDynamics.
 grain size distribution related fields
 
 .. codeauthor:: Angel Monsalve
@@ -11,7 +11,7 @@ import numpy as np
 
 
 def adds_2mm_to_gsd(gsd):
-    """Adds the 2 mm fraction to the gsd. This allows faster calculations when
+    """Add the 2 mm fraction to the GSD. This allows faster calculations when
     sand fractions are required or have to be excluded. It is only added
     if the input gsd does not contain the specific 2 mm fraction
 
@@ -34,7 +34,7 @@ def adds_2mm_to_gsd(gsd):
     So, in this case nothing happens. Now we will introduce a gsd that needs to include the
     2 mm fraction.
 
-    Case2: gsd will  be modified because not all sizes are larger than 2 mm
+    Case2 : gsd will be modified because not all sizes are larger than 2 mm
 
     >>> gsd = [[32, 100, 100], [16, 25, 50], [1, 0, 0]]
     >>> gsd = initialize_gsd.adds_2mm_to_gsd(gsd)
@@ -72,7 +72,7 @@ def adds_2mm_to_gsd(gsd):
 
 
 def remove_sand_from_gsd(gsd, selected_eq):
-    """When using Parker Eq. sand needs to be removed from gsd.
+    """Remove sand from the GSD for Parker-style transport equations.
     This functions removes sand from gsd
 
     Examples
@@ -94,7 +94,7 @@ def remove_sand_from_gsd(gsd, selected_eq):
     So, in this case nothing happens. Now we will introduce a gsd that needs to include the
     2 mm fraction.
 
-    Case2: gsd will  be modified because not all sizes are larger than 2 mm. First we need to
+    Case2 : gsd will be modified because not all sizes are larger than 2 mm. First we need to
     determine sand fractions, which is done by adding the 2 mm fraction
 
     >>> gsd = [[32, 100, 100], [16, 25, 50], [1, 0, 0]]
@@ -130,7 +130,7 @@ def remove_sand_from_gsd(gsd, selected_eq):
 
 
 def map_initial_bed_properties_to_nodes(gsd, gsd_loc_node):
-    """Grain size distribution information is mapped from
+    """Map grain-size-distribution information from
     inputs to each nodes
 
     Examples

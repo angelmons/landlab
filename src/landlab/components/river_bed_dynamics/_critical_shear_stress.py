@@ -5,14 +5,14 @@ This module replaces the fixed ``tau_star_cr = 0.047`` (MPM constant) and the
 existing ``variable_critical_shear_stress`` slope-based logic with a physically
 consistent iterative solver that couples three effects simultaneously:
 
-1. **Shields stress** — tau* = tau / ((rho_s - rho) g D50)
+1. **Shields stress**  -  tau* = tau / ((rho_s - rho) g D50)
    Both rho and therefore the denominator change with temperature.
 
-2. **Critical Shields stress via Paphitis (2001)** — tau*_cr = f(Re_s)
+2. **Critical Shields stress via Paphitis (2001)**  -  tau*_cr = f(Re_s)
    The particle Reynolds number Re_s = rho u* D50 / mu depends on both
    rho and mu, so the whole Shields curve shifts with temperature.
 
-3. **Viscous sublayer** — delta_v = 11.6 nu / u*
+3. **Viscous sublayer**  -  delta_v = 11.6 nu / u*
    A grain is hydraulically smooth when D50 < delta_v, transitional when
    delta_v < D50 < 70 nu/u*, and fully rough when D50 > 70 nu/u*.
    This modulates B_s and hence the log-law reconstruction of tau from U.
@@ -154,15 +154,15 @@ def compute_critical_shear_stress(
 
     Parameters
     ----------
-    U : ndarray, shape (n_links,)
+    U : ndarray
         Depth-averaged velocity magnitude at links [m s^-1].
-    h : ndarray, shape (n_links,)
+    h : ndarray
         Water depth at links [m].
-    D50_m : ndarray, shape (n_links,)
+    D50_m : ndarray
         Median surface grain diameter at links [m].
     rho_s : float
         Sediment density [kg m^-3].
-    T : float or ndarray, shape (n_links,) or scalar
+    T : float or ndarray or scalar
         Water temperature [°C].  Scalar applies uniformly; an array allows
         spatially variable temperature (e.g. from RiverTemperatureDynamics).
         Default is 20 °C (standard reference temperature).
@@ -182,15 +182,15 @@ def compute_critical_shear_stress(
     Returns
     -------
     result : dict with keys
-        ``tau_cr``        — critical shear stress [Pa], shape (n_links,)
-        ``tau_cr_star``   — dimensionless critical Shields stress [-]
-        ``tau_star``      — current dimensionless Shields stress [-]
-        ``Re_s_cr``       — critical particle Reynolds number [-]
-        ``u_star``        — shear velocity from current flow [m s^-1]
-        ``u_star_cr``     — critical shear velocity [m s^-1]
-        ``delta_v``       — viscous sublayer thickness [m]
-        ``rho``           — water density used [kg m^-3]
-        ``mu``            — dynamic viscosity used [Pa s]
+        ``tau_cr``         -  critical shear stress [Pa], shape (n_links,)
+        ``tau_cr_star``    -  dimensionless critical Shields stress [-]
+        ``tau_star``       -  current dimensionless Shields stress [-]
+        ``Re_s_cr``        -  critical particle Reynolds number [-]
+        ``u_star``         -  shear velocity from current flow [m s^-1]
+        ``u_star_cr``      -  critical shear velocity [m s^-1]
+        ``delta_v``        -  viscous sublayer thickness [m]
+        ``rho``            -  water density used [kg m^-3]
+        ``mu``             -  dynamic viscosity used [Pa s]
 
     Notes
     -----

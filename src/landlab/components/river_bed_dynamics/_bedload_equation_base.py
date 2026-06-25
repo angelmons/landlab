@@ -13,7 +13,6 @@ Adding a new equation
 4. Pass that key as ``bedload_equation=`` in :class:`RiverBedDynamics.__init__`.
 
 .. codeauthor:: Angel Monsalve (original equations)
-.. codeauthor:: Phase-3 refactor — class hierarchy
 """
 
 from __future__ import annotations
@@ -25,16 +24,15 @@ import numpy as np
 
 
 class BedloadEquation(ABC):
-    """Abstract base class for all bedload transport equations.
+    """Represent the abstract base class for bedload transport equations.
 
     Concrete subclasses implement the :meth:`calculate` method, which reads
     whatever it needs from the ``rbd`` component instance and returns the
     per-link bedload transport rate and, optionally, the fractional grain-size
     distribution of the transported sediment.
 
-    The interface is deliberately minimal: subclasses are free to use any
-    fields stored on ``rbd`` without restriction.  Future refactors can narrow
-    the interface once the class hierarchy is stable.
+    The interface is deliberately minimal: subclasses read the fields they need
+    from the supplied ``rbd`` component instance.
     """
 
     #: Human-readable name, used in error messages and repr.
@@ -52,10 +50,10 @@ class BedloadEquation(ABC):
 
         Returns
         -------
-        sed_transp__bedload_rate_link : ndarray, shape (n_links,)
+        sed_transp__bedload_rate_link : ndarray
             Volumetric bedload transport rate per unit width [m²/s] at each
             link.  Signed: positive in the positive link direction.
-        sed_transp__bedload_gsd_link : ndarray, shape (n_links, n_grains) or None
+        sed_transp__bedload_gsd_link : ndarray or None
             Fractional grain-size distribution of the bedload at each link,
             or ``None`` for equations that do not resolve grain fractions
             (e.g. MPM-style total-load equations).
@@ -67,18 +65,18 @@ class BedloadEquation(ABC):
 
 
 # --------------------------------------------------------------------------- #
-# Concrete wrappers — thin shells around the module-level functions
+# Concrete wrappers  -  thin shells around the module-level functions
 # --------------------------------------------------------------------------- #
 # Each wrapper delegates to the existing function so that doctests and
 # backward-compatible call sites continue to work unchanged.
 
 
 class MPMEquation(BedloadEquation):
-    """Meyer-Peter and Müller (1948) total bedload transport equation.
+    """Represent the Meyer-Peter and Müller (1948) total bedload transport equation.
 
     Computes the total volumetric bedload rate per unit width using the
     classic MPM power-law relationship with critical Shields stress.  Does
-    not resolve grain-size fractions in the bedload — all sediment is
+    not resolve grain-size fractions in the bedload  -  all sediment is
     treated as a single class.
 
     Notes
@@ -90,7 +88,7 @@ class MPMEquation(BedloadEquation):
     References
     ----------
     Meyer-Peter, E., & Müller, R. (1948). Formulas for bed-load transport.
-    *Proceedings of the 2nd IAHR Congress*, Stockholm, Sweden, 39–64.
+    *Proceedings of the 2nd IAHR Congress*, Stockholm, Sweden, 39-64.
     """
 
     name = "MPM"
@@ -103,7 +101,7 @@ class MPMEquation(BedloadEquation):
 
 
 class FLvBEquation(BedloadEquation):
-    """Fernandez Luque & van Beek (1976) total bedload transport equation.
+    """Represent the Fernandez Luque and van Beek (1976) total bedload transport equation.
 
     An alternative total-load formula derived from experiments with
     uniform sediment.  Returns a single transport rate with no fractional
@@ -112,7 +110,7 @@ class FLvBEquation(BedloadEquation):
     References
     ----------
     Fernandez Luque, R., & van Beek, R. (1976). Erosion and transport of
-    bed-load sediment. *Journal of Hydraulic Research*, 14(2), 127–144.
+    bed-load sediment. *Journal of Hydraulic Research*, 14(2), 127-144.
     https://doi.org/10.1080/00221687609499677
     """
 
@@ -126,7 +124,7 @@ class FLvBEquation(BedloadEquation):
 
 
 class WongAndParkerEquation(BedloadEquation):
-    """Wong and Parker (2006) corrected MPM equation.
+    """Represent the Wong and Parker (2006) corrected MPM equation.
 
     Reanalysis of the MPM dataset that corrects for form drag and produces
     a lower transport coefficient.  Total-load only (no fractional GSD).
@@ -135,7 +133,7 @@ class WongAndParkerEquation(BedloadEquation):
     ----------
     Wong, M., & Parker, G. (2006). Reanalysis and correction of bed-load
     relation of Meyer-Peter and Müller using their own database.
-    *Journal of Hydraulic Engineering*, 132(11), 1159–1168.
+    *Journal of Hydraulic Engineering*, 132(11), 1159-1168.
     https://doi.org/10.1061/(ASCE)0733-9429(2006)132:11(1159)
     """
 
@@ -149,7 +147,7 @@ class WongAndParkerEquation(BedloadEquation):
 
 
 class HuangEquation(BedloadEquation):
-    """He Qing Huang (2010) reformulation of the MPM equation.
+    """Represent the He Qing Huang (2010) reformulation of the MPM equation.
 
     Re-derived from dimensional analysis and fits to a broad dataset.
     Total-load only (no fractional GSD).
@@ -172,7 +170,7 @@ class HuangEquation(BedloadEquation):
 
 
 class Parker1990Equation(BedloadEquation):
-    """Parker (1990) surface-based fractional bedload transport equation.
+    """Represent the Parker (1990) surface-based fractional bedload transport equation.
 
     A hiding-function-based formula for mixed-size gravel transport.
     Computes a fractional GSD for the bedload as well as the total rate.
@@ -188,7 +186,7 @@ class Parker1990Equation(BedloadEquation):
     References
     ----------
     Parker, G. (1990). Surface-based bedload transport relation for gravel
-    rivers. *Journal of Hydraulic Research*, 28(4), 417–436.
+    rivers. *Journal of Hydraulic Research*, 28(4), 417-436.
     https://doi.org/10.1080/00221689009499058
     """
 
@@ -202,11 +200,11 @@ class Parker1990Equation(BedloadEquation):
 
 
 class WilcockCrowe2003Equation(BedloadEquation):
-    """Wilcock and Crowe (2003) surface-based mixed-size transport equation.
+    """Represent the Wilcock and Crowe (2003) surface-based mixed-size transport equation.
 
-    Extends the two-fraction (sand–gravel) hiding function to a continuous
+    Extends the two-fraction (sand-gravel) hiding function to a continuous
     GSD.  Produces fractional bedload transport rates suitable for tracking
-    gravel–sand exchange and GSD evolution.
+    gravel-sand exchange and GSD evolution.
 
     Notes
     -----
@@ -218,7 +216,7 @@ class WilcockCrowe2003Equation(BedloadEquation):
     ----------
     Wilcock, P. R., & Crowe, J. C. (2003). Surface-based transport model
     for mixed-size sediment. *Journal of Hydraulic Engineering*, 129(2),
-    120–128. https://doi.org/10.1061/(ASCE)0733-9429(2003)129:2(120)
+    120-128. https://doi.org/10.1061/(ASCE)0733-9429(2003)129:2(120)
     """
 
     name = "WilcockAndCrowe"
@@ -231,7 +229,7 @@ class WilcockCrowe2003Equation(BedloadEquation):
 
 
 # --------------------------------------------------------------------------- #
-# Registry — maps user-facing string keys to equation classes
+# Registry  -  maps user-facing string keys to equation classes
 # --------------------------------------------------------------------------- #
 
 #: Maps ``bedload_equation`` parameter strings to :class:`BedloadEquation`

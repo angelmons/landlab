@@ -166,7 +166,7 @@ def test_initialization_creates_fields():
 
 
 # -----------------------------------------------------------------------------
-# 2) Lake at rest — flat bed (well-balanced, no motion)
+# 2) Lake at rest  -  flat bed (well-balanced, no motion)
 # -----------------------------------------------------------------------------
 
 
@@ -191,7 +191,7 @@ def test_lake_at_rest_flat():
 
 
 # -----------------------------------------------------------------------------
-# 3) Lake at rest — bumpy bed (hydrostatic reconstruction / well-balanced)
+# 3) Lake at rest  -  bumpy bed (hydrostatic reconstruction / well-balanced)
 # -----------------------------------------------------------------------------
 
 

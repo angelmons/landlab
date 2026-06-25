@@ -77,7 +77,7 @@ def vector_mapper(grid, vector):
 
 
 def map_gsd_from_link_to_node(self, location="bed_surf"):
-    """Maps grain size distribution from links onto nodes.
+    """Map grain-size distribution from links onto nodes.
 
     Given that all our calculations are conducted in links we implemented
     this function to display results in a raster or in nodes.
@@ -207,7 +207,7 @@ def map_gsd_from_link_to_node(self, location="bed_surf"):
 
     # Pad gsd_l with one zero sentinel row so that index n_links is safe.
     # links_at_node uses -1 for missing links; Python's -1 indexing would
-    # silently return the last link's values — a bug this approach avoids.
+    # silently return the last link's values  -  an indexing error this approach avoids.
     gsd_padded = np.vstack([gsd_l, np.zeros((1, n_grains))])
 
     # Replace -1 entries with n_links (→ the zero sentinel row)
@@ -392,7 +392,7 @@ def get_available_fields():
 
     The list covers every persistent attribute that represents a physical
     quantity users may wish to post-process or visualise.  Fields added in
-    Phases 2–5 are included alongside the original set.
+    Optional diagnostic and diffusion fields are included alongside the core fields.
 
     Returns
     -------
@@ -403,18 +403,18 @@ def get_available_fields():
 
     Notes
     -----
-    **Fields added in Phase 4C** (GSD residual diagnostics):
+    **GSD residual diagnostic fields**:
 
-    * ``rbd._bed_surf__gsd_residual_max`` ``[-]`` — maximum
-      ``|Σf_i − 1|`` across all links, recorded before the last GSD
+    * ``rbd._bed_surf__gsd_residual_max`` ``[-]``  -  maximum
+      ``|Σf_i - 1|`` across all links, recorded before the last GSD
       renormalisation step.  Non-zero values indicate numerical drift in
       the fractional Exner equation.
-    * ``rbd._bed_surf__gsd_residual_mean`` ``[-]`` — mean of the same
+    * ``rbd._bed_surf__gsd_residual_mean`` ``[-]``  -  mean of the same
       residual.
 
-    **Field added in Phase 5** (gravitational diffusion):
+    **Gravitational diffusion field**:
 
-    * ``rbd._bed_surf__diffusive_dz_node`` ``[m]`` — elevation change at
+    * ``rbd._bed_surf__diffusive_dz_node`` ``[m]``  -  elevation change at
       each node due to the gravitational diffusion correction applied
       during the current time step.  Always zero when
       ``use_bed_diffusion=False``.
@@ -493,10 +493,10 @@ def get_available_fields():
             ("rbd._topogr__elev_orig_link", "[m]"),
             ("rbd._topogr__elev_orig_node", "[m]"),
             ("rbd._topogr__elev_subsurf_link", "[m]"),
-            # ── Phase 4C: GSD normalisation diagnostics ──────────────────── #
+            # GSD normalisation diagnostics
             ("rbd._bed_surf__gsd_residual_max", "[-]"),
             ("rbd._bed_surf__gsd_residual_mean", "[-]"),
-            # ── Phase 5: gravitational diffusion ─────────────────────────── #
+            # Gravitational diffusion
             ("rbd._bed_surf__diffusive_dz_node", "[m]"),
         ]
     )

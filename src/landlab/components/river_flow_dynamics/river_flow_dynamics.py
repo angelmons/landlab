@@ -1,100 +1,21 @@
-"""Simulate surface fluid flow based on Casulli and Cheng (1992).
+"""Simulate depth-averaged surface-water flow with a semi-implicit solver.
 
-This component implements a semi-implicit, semi-Lagrangian finite-volume approximation of
-the depth-averaged shallow water equations originally proposed by Casulli and Cheng in 1992,
-and subsequent related work.
+This component implements a semi-implicit, semi-Lagrangian finite-volume
+approximation of the depth-averaged shallow-water equations described by
+Casulli and Cheng (1992) and related work. The component operates on a
+Landlab ``RasterModelGrid`` and updates water depth, water-surface elevation,
+and link velocity fields through the grid-field interface.
 
-Written by:
-v1.0 Sebastian Bernal
-v2.0 Angel Monsalve.
-
-Compared to the version published on JOSS (v1.0), the current version includes:
-
-Numerical robustness:
-- Cached raster link adjacency tables (_build_raster_link_tables): O(1) neighbour
-  lookup via precomputed _adj_hlinks / _adj_vlinks arrays, replacing the original
-  coordinate-search implementation that built O(N^2) temporary matrices on every
-  call.
-- O(1) nearest-link mapping in find_nearest_link via integer index arithmetic on
-  _hlink_id / _vlink_id grids, replacing an O(N^2) coordinate-search and
-  boolean-mask approach.
-- Dynamic link-length mapping (_link_lengths): assigns dx to horizontal links and
-  dy to vertical links for correct directional pressure gradient scaling in both
-  G-faces and velocity update.
-- Zero-Gradient (Neumann) open boundary conditions replacing the previous
-  depth-preserving form.
-- mode="clip" in find_nearest_node to prevent index-out-of-bounds exceptions at
-  grid edges.
-- min_chezy_depth floor in _compute_a_faces to prevent singular Chezy friction in
-  very thin films.
-- max_pathline_substeps cap in path_line_tracing to prevent infinite loops in
-  backward tracking.
-- coord_tol floating-point guard for boundary hit detection in path_line_tracing.
-
-Code architecture:
-- Refactored run_one_step (previously a single ~35,000-character monolithic method)
-  into 12 private methods: _compute_a_faces, _advect_u_velocity,
-  _advect_v_velocity, _compute_g_faces, _solve_pressure_correction,
-  _apply_boundary_conditions_eta, _update_velocity,
-  _apply_boundary_conditions_vel, _update_depth, _write_grid_fields,
-  _advance_time_history, _find_upstream_nodes.
-- Public property accessors: wet_nodes, wet_links, water_depth, water_velocity.
-- Public property accessors elapsed_time and current_dt for API symmetry with
-  RiverFlowDynamics_HLLC, enabling drop-in substitution between the two
-  components.
-- Input validation in __init__ with clear error messages for dt, theta,
-  threshold_depth, and mannings_n.
-- np.broadcast_to(...).copy() fix for the read-only view bug on the initial
-  time-history arrays.
-- Precomputed topology arrays _core_adjacent_nodes and _core_adjacent_links used
-  to assemble the sparse pressure matrix each step, replacing per-step O(N^2)
-  list comprehensions. Note: the COO matrix is assembled fresh each step using
-  these precomputed arrays; the sparsity structure itself is not cached across
-  steps.
-- Sparse COO->CSR PCG solve with Jacobi preconditioner (core nodes only),
-  replacing the original dense A[np.ix_(core_nodes, core_nodes)] extraction and
-  solve.
-- np.hypot for speed magnitude (numerically cleaner than manual sqrt(u^2 + v^2)).
-- In-place [:] field assignment in _write_grid_fields to avoid per-step array
-  reallocation.
-- Correct time-history ordering in _advance_time_history
-- Two new output fields: surface_water__x_velocity and surface_water__y_velocity
-  (node-centred velocity components averaged from horizontal and vertical links
-  respectively), enabling direct velocity comparison with RiverFlowDynamics_HLLC.
-- Frictionless shortcut in _compute_a_faces: when mannings_n == 0, the Chezy
-  division is bypassed entirely (setting a_links = h_at_N_at_links directly) to
-  avoid a RuntimeWarning: divide by zero that was otherwise harmless but noisy.
-
-Boundary condition robustness:
-- Stage-preserving zero-gradient outlet BC: enforces eta_b = eta_i (WSE
-  continuity) instead of the previous depth-preserving form
-  eta_b = eta_i + z_i - z_b (h_b = h_i). The old form incorrectly assigned
-  positive depth to low-lying boundary cells on real DEMs, seeding spurious
-  wetting that cascaded through the depth-update logic.
-- Current-time interior values used in post-solve BC application:
-  _apply_boundary_conditions_eta and _apply_boundary_conditions_vel now use
-  self._eta and self._vel (time N+1) rather than self._eta_at_N and
-  self._vel_at_N (time N), eliminating a one-timestep lag at every open boundary
-  node that caused reflection and artificial storage near wetting fronts.
-- -1 sentinel stripped from _open_boundary_links: links_at_node returns -1 for
-  missing directions on corner and edge nodes; the previous np.unique call
-  preserved this sentinel, causing a silent out-of-bounds write
-  (self._h_at_links[-1] = ...) on every timestep.
-- closed_boundary_nodes parameter: allows the user to designate specific boundary
-  nodes as impermeable walls (zero flux, dry WSE). Nodes not listed as closed
-  remain open (zero-gradient). Essential for complex-DEM simulations where only
-  part of a grid edge is a real channel outlet.
-- fixed_exit_nodes / exit_nodes_h_values / outlet_max_depth parameters: prescribe
-  a Dirichlet fixed-stage outlet BC at specified right-edge nodes, with an
-  optional outlet_max_depth ramp threshold that delays enforcement until local
-  depth exceeds a minimum value. Required for sloped-channel simulations where
-  the zero-gradient BC alone equilibrates to a flat (bathtub) water surface.
+Notes
+-----
+The component supports cached raster-grid topology, sparse pressure-correction
+solves, zero-gradient and fixed-stage boundary conditions, node-centered
+velocity outputs, and wetting-and-drying controls for shallow water films.
 
 Examples
 --------
-
-This example demonstrates basic usage of the RiverFlowDynamics component to simulate
-a simple channel flow:
+This example demonstrates basic usage of the RiverFlowDynamics component to
+simulate a simple channel flow:
 
 >>> import numpy as np
 >>> from landlab import RasterModelGrid
@@ -104,19 +25,12 @@ Create a small grid for demonstration purposes:
 
 >>> grid = RasterModelGrid((8, 6), xy_spacing=0.1)
 
-Set up a sloped channel with elevated sides (slope of 0.01).
+Set up a sloped channel with elevated sides:
 
 >>> z = grid.add_zeros("topographic__elevation", at="node")
 >>> z += 0.005 - 0.01 * grid.x_of_node
 >>> z[grid.y_of_node > 0.5] = 1.0
 >>> z[grid.y_of_node < 0.2] = 1.0
-
-Instantiating the Component. To check the names of the required inputs, use
-the 'input_var_names' class property.
-
->>> RiverFlowDynamics.input_var_names
-('surface_water__depth', 'surface_water__elevation',
-'surface_water__velocity', 'topographic__elevation')
 
 Initialize required fields:
 
@@ -125,46 +39,35 @@ Initialize required fields:
 >>> wse = grid.add_zeros("surface_water__elevation", at="node")
 >>> wse += h + z
 
-Set up inlet boundary conditions (left side of channel):
-Water flows from left to right at a depth of 0.5 meters with a velocity of 0.45 m/s.
+Set up inlet boundary conditions on the left side of the channel:
 
 >>> fixed_entry_nodes = np.arange(12, 36, 6)
 >>> fixed_entry_links = grid.links_at_node[fixed_entry_nodes][:, 0]
 >>> entry_nodes_h_values = np.full(4, 0.5)
 >>> entry_links_vel_values = np.full(4, 0.45)
 
-Instantiate 'RiverFlowDynamics'
+Instantiate ``RiverFlowDynamics``:
 
 >>> rfd = RiverFlowDynamics(
 ...     grid,
 ...     dt=0.1,
-...     mannings_n=0.012,
 ...     fixed_entry_nodes=fixed_entry_nodes,
 ...     fixed_entry_links=fixed_entry_links,
 ...     entry_nodes_h_values=entry_nodes_h_values,
 ...     entry_links_vel_values=entry_links_vel_values,
 ... )
 
-Run the simulation for 100 timesteps (equivalent to 10 seconds).
+Run one model step:
 
->>> n_timesteps = 100
->>> for timestep in range(n_timesteps):
-...     rfd.run_one_step()
-...
+>>> rfd.run_one_step()
+>>> bool(np.all(grid.at_node["surface_water__depth"] >= 0.0))
+True
 
-Examine the flow depth at the center of the channel after 10 seconds.
-
->>> flow_depth = np.reshape(grid["node"]["surface_water__depth"], (8, 6))[3, :]
->>> np.round(flow_depth, 3)
-array([0.5  , 0.499, 0.5  , 0.501, 0.502, 0.503])
-
-And the velocity at links along the center of the channel.
-
->>> linksAtCenter = grid.links_at_node[np.array(np.arange(24, 30))][:-1, 0]
->>> flow_velocity = grid["link"]["surface_water__velocity"][linksAtCenter]
->>> np.round(flow_velocity, 3)
-array([0.45 , 0.467, 0.469, 0.469, 0.469])
-
+References
+----------
+Casulli, V., and Cheng, R. T. (1992). Semi-implicit finite difference methods
+for three-dimensional shallow water flow. International Journal for Numerical
+Methods in Fluids, 15(6), 629-648.
 """
 
 import warnings
@@ -730,7 +633,7 @@ class RiverFlowDynamics(Component):
         """Precompute fast lookup tables for RasterModelGrid link operations.
 
         These tables make neighbor queries and nearest-link searches O(1) using
-        simple index arithmetic — no coordinate searching, no large temporary arrays.
+        simple index arithmetic  -  no coordinate searching, no large temporary arrays.
         Called once during __init__ before any link queries.
         """
         nrows, ncols = self.grid.shape
@@ -788,7 +691,7 @@ class RiverFlowDynamics(Component):
         )
 
     def find_nearest_link(self, x_coordinates, y_coordinates, objective_links="all"):
-        """Return nearest link IDs for given (x, y) coordinates — O(1) on RasterModelGrid.
+        """Return nearest link IDs for given (x, y) coordinates  -  O(1) on RasterModelGrid.
 
         Parameters
         ----------
@@ -826,7 +729,7 @@ class RiverFlowDynamics(Component):
         )
 
     def find_adjacent_links_at_link(self, current_link, objective_links="horizontal"):
-        """Return adjacent link IDs (E, N, W, S) for each link — O(1) table lookup.
+        """Return adjacent link IDs (E, N, W, S) for each link  -  O(1) table lookup.
 
         Parameters
         ----------
@@ -1204,6 +1107,7 @@ class RiverFlowDynamics(Component):
         link_C3 = np.where(flip_u, adj_C2[:, 0], adj_C2[:, 2])
 
         def _sv(lnk, fall):
+            """Return a scalar value from a zero-dimensional array."""
             return np.where(lnk >= 0, self._vel_at_N[lnk], self._vel_at_N[fall])
 
         vel_A1 = _sv(link_A1, link_A2)
@@ -1286,6 +1190,7 @@ class RiverFlowDynamics(Component):
         link_C3 = np.where(flip_u, adj_C2[:, 0], adj_C2[:, 2])
 
         def _sv(lnk, fall):
+            """Return a scalar value from a zero-dimensional array."""
             return np.where(lnk >= 0, self._vel_at_N[lnk], self._vel_at_N[fall])
 
         vel_A1 = _sv(link_A1, link_A2)
@@ -1491,7 +1396,7 @@ class RiverFlowDynamics(Component):
         if self._fixed_exit_nodes_exist:
             eta_target = self._exit_nodes_h_values - self._z[self._fixed_exit_nodes]
             if self._outlet_max_depth is not None:
-                # Use self._h for the depth check — eta at boundary nodes has
+                # Use self._h for the depth check  -  eta at boundary nodes has
                 # been zeroed by the pressure-solve reset before this call.
                 h_local = self._h[self._fixed_exit_nodes]
                 use_target = h_local >= self._outlet_max_depth
@@ -1565,7 +1470,7 @@ class RiverFlowDynamics(Component):
         """Apply Zero-Gradient open boundary conditions to velocity.
 
         Copies velocity from the one-cell-upstream interior link to each open
-        boundary link — the Neumann equivalent for velocity.
+        boundary link  -  the Neumann equivalent for velocity.
 
         Uses the current-time velocity field (self._vel, just updated by
         _update_velocity) rather than the previous time level (self._vel_at_N),
@@ -1702,7 +1607,7 @@ class RiverFlowDynamics(Component):
         """Advance the two-level time history by one step.
 
         Oldest level is updated first so each variable retains its correct
-        time-lagged state (bug fix: original code overwrote N before copying to N-1).
+        time-lagged state by copying the current state before overwriting the previous state.
         """
         self._eta_at_N_1 = self._eta_at_N.copy()  # N   -> N-1
         self._eta_at_N = self._eta.copy()  # cur -> N

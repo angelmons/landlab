@@ -41,13 +41,13 @@ from __future__ import annotations
 
 import numpy as np
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Density
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def water_density(T: float | np.ndarray) -> float | np.ndarray:
-    """Water density as a function of temperature (Heggen 1983).
+    """Calculate water density as a function of temperature (Heggen 1983).
 
     Parameters
     ----------
@@ -73,7 +73,8 @@ def water_density(T: float | np.ndarray) -> float | np.ndarray:
 
 
 def d_rho_dT(T: float | np.ndarray) -> float | np.ndarray:
-    """Partial derivative of water density with respect to temperature (Eq. 6).
+    """Calculate the partial derivative of water density with respect to
+    temperature.
 
     Parameters
     ----------
@@ -89,7 +90,7 @@ def d_rho_dT(T: float | np.ndarray) -> float | np.ndarray:
     --------
     >>> import numpy as np
     >>> from ._fluid_properties import d_rho_dT
-    >>> float(np.round(d_rho_dT(4.0), 6))  # density maximum — slope is zero
+    >>> float(np.round(d_rho_dT(4.0), 6))  # density maximum  -  slope is zero
     0.0
     >>> d_rho_dT(20.0) < 0  # density decreases above 4 °C
     True
@@ -112,7 +113,8 @@ def d_rho_dT(T: float | np.ndarray) -> float | np.ndarray:
 
 
 def water_viscosity(T: float | np.ndarray) -> float | np.ndarray:
-    """Dynamic viscosity of water as a function of temperature (Heggen 1983).
+    """Calculate dynamic viscosity of water as a function of temperature
+    (Heggen 1983).
 
     Parameters
     ----------
@@ -136,7 +138,8 @@ def water_viscosity(T: float | np.ndarray) -> float | np.ndarray:
 
 
 def d_mu_dT(T: float | np.ndarray) -> float | np.ndarray:
-    """Partial derivative of dynamic viscosity with respect to temperature (Eq. 7).
+    """Calculate the partial derivative of dynamic viscosity with respect to
+    temperature.
 
     Parameters
     ----------
@@ -159,9 +162,9 @@ def d_mu_dT(T: float | np.ndarray) -> float | np.ndarray:
     return -6.4979e-5 * np.exp(-(T**0.9) / 22.0) * T ** (-0.1)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # Particle Reynolds number and derived quantities
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def particle_reynolds(
@@ -170,7 +173,8 @@ def particle_reynolds(
     rho: float | np.ndarray,
     mu: float | np.ndarray,
 ) -> float | np.ndarray:
-    """Particle (shear) Reynolds number  Re_s = rho * u* * D50 / mu.
+    """Calculate particle Reynolds number from shear velocity, grain size,
+    density, and viscosity.
 
     Parameters
     ----------
@@ -196,7 +200,8 @@ def viscous_sublayer_thickness(
     rho: float | np.ndarray,
     mu: float | np.ndarray,
 ) -> float | np.ndarray:
-    """Viscous sublayer thickness  delta_v = 11.6 * nu / u*   [m].
+    """Calculate viscous sublayer thickness from kinematic viscosity and shear
+    velocity.
 
     The constant 11.6 corresponds to the edge of the viscous sublayer in the
     universal law-of-the-wall (y^+ = 11.6).
@@ -221,9 +226,9 @@ def viscous_sublayer_thickness(
     return delta_v
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Critical Shields stress (Paphitis 2001) — temperature-aware
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Critical Shields stress (Paphitis 2001)  -  temperature-aware
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 def _B_s(Re_s: np.ndarray) -> np.ndarray:
@@ -233,7 +238,7 @@ def _B_s(Re_s: np.ndarray) -> np.ndarray:
 
 
 def paphitis_tau_cr_star(Re_s: np.ndarray) -> np.ndarray:
-    """Critical Shields stress from Paphitis (2001) — Eq. 4.
+    """Critical Shields stress from Paphitis (2001)  -  Eq. 4.
 
     Valid for  0.01 < Re_s < 1e5.
 
@@ -257,7 +262,7 @@ def shields_stress(
     g: float,
     D50_m: np.ndarray,
 ) -> np.ndarray:
-    """Dimensionless Shields stress  tau* = tau / ((rho_s - rho) g D50)  (Eq. 1).
+    """Calculate dimensionless Shields stress from shear stress and grain size.
 
     Parameters
     ----------

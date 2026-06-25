@@ -1,5 +1,5 @@
 """
-Implements the Parker 1990 bed load transport equations to calculate bed load rates
+Implement the Parker (1990) bedload transport equation to calculate bedload rates
 at links.
 
 .. codeauthor:: Angel Monsalve
@@ -216,7 +216,7 @@ def strain_functions(phi_sgo):
 
 
 def bedload_equation(self):
-    """Surface-based bedload transport equation of Parker 1990
+    """Calculate surface-based bedload transport with the Parker (1990) equation.
 
     G. Parker (1990) Surface-based bedload transport relation for gravel rivers,
     Journal of Hydraulic Research, 28:4, 417-436, DOI: 10.1080/00221689009499058

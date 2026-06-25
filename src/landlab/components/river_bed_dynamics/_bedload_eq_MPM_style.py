@@ -1,5 +1,5 @@
 """
-Implements several bed load transport equations to calculate bed load rates at
+Implement several bedload transport equations to calculate bedload rates at
 links. All equations are of the style qb = a * (tau* - tau*c) **b
 
 Temperature effects
@@ -7,18 +7,18 @@ Temperature effects
 When ``rbd._variable_fluid_properties is True``, three temperature-driven
 corrections are applied simultaneously:
 
-1. **Shields stress** — tau* = tau / ((rho_s - rho) g D50)
+1. **Shields stress**  -  tau* = tau / ((rho_s - rho) g D50)
    ``rbd._rho`` is a per-link array (Heggen 1983), so the denominator
    changes spatially with water temperature. Because ``rho`` and ``R`` are
    read from ``rbd`` at call-time, this correction is already captured by the
-   existing ``tau_star`` line — no formula change required.
+   existing ``tau_star`` line  -  no formula change required.
 
-2. **Critical Shields stress** — tau*_cr from Paphitis (2001) via Re_s
+2. **Critical Shields stress**  -  tau*_cr from Paphitis (2001) via Re_s
    Replaces the fixed constants (0.047 MPM, 0.045 FLvB …) and the existing
    slope-based ``variable_critical_shear_stress`` path with the full
    temperature-aware iterative solve from ``_critical_shear_stress.py``.
 
-3. **Viscous sublayer** — delta_v = 11.6 nu / u*
+3. **Viscous sublayer**  -  delta_v = 11.6 nu / u*
    Handled inside ``compute_critical_shear_stress`` via the temperature-aware
    log-law (Eq. 2-3 of Link et al. 2019). The result is stored on ``rbd``
    as ``rbd._delta_v_link`` for inspection but does not enter the qb formula
@@ -247,14 +247,14 @@ def _get_tau_star_cr(rbd, tau_star, tau_star_cr_fixed, tau_star_cr_0):
 
     Three mutually exclusive paths, selected by flags on the parent component:
 
-    1. ``variable_fluid_properties=True`` — Paphitis (2001) solve via Re_s,
+    1. ``variable_fluid_properties=True``  -  Paphitis (2001) solve via Re_s,
        fully temperature-aware (Shields stress + critical tau*_cr + viscous
        sublayer). Overrides ``variable_critical_shear_stress``.
 
-    2. ``variable_critical_shear_stress=True`` (legacy slope-based) — Mueller
+    2. ``variable_critical_shear_stress=True`` (slope-based)  -  Mueller
        et al. (2005) slope correction, no temperature correction.
 
-    3. Neither flag — fixed constant (0.047 MPM, 0.045 FLvB …).
+    3. Neither flag  -  fixed constant (0.047 MPM, 0.045 FLvB …).
 
     Parameters
     ----------
@@ -265,12 +265,12 @@ def _get_tau_star_cr(rbd, tau_star, tau_star_cr_fixed, tau_star_cr_0):
     tau_star_cr_fixed : float
         Equation-specific default critical Shields stress (e.g. 0.047 MPM).
     tau_star_cr_0 : ndarray
-        Slope-based critical Shields stress from Mueller et al. (2005) [–].
+        Slope-based critical Shields stress from Mueller et al. (2005) [-].
         Only used when ``variable_critical_shear_stress=True``.
 
     Returns
     -------
-    tau_star_cr : ndarray, shape (n_links,)
+    tau_star_cr : ndarray
         Critical dimensionless Shields stress at every link.
     """
     # ── Path 1: temperature-aware Paphitis solve ──────────────────────────
@@ -293,7 +293,7 @@ def _get_tau_star_cr(rbd, tau_star, tau_star_cr_fixed, tau_star_cr_0):
         rbd._u_star_cr_link = result["u_star_cr"]
         return result["tau_cr_star"]
 
-    # ── Path 2: legacy slope-based correction (variable_critical_shear_stress)
+    # ── Path 2: slope-based correction (variable_critical_shear_stress)
     tau_star_cr = np.full(tau_star.shape, tau_star_cr_fixed)
     if rbd._variable_critical_shear_stress:
         tau_star_cr = np.where(tau_star_cr_0 < 0.021, tau_star_cr, tau_star_cr_0)
@@ -302,12 +302,12 @@ def _get_tau_star_cr(rbd, tau_star, tau_star_cr_fixed, tau_star_cr_0):
 
 
 # ---------------------------------------------------------------------------
-# Shared computational kernel — used by all four MPM-style wrappers
+# Shared computational kernel  -  used by all four MPM-style wrappers
 # ---------------------------------------------------------------------------
 
 
 def _compute_qb(rbd, equation_fn):
-    """Shared kernel for all MPM-style equations.
+    """Calculate bedload rate for MPM-style equations.
 
     Computes the dimensionless Shields stress, delegates the qb* calculation
     to *equation_fn*, then converts back to dimensional transport rate [m²/s].
@@ -316,7 +316,7 @@ def _compute_qb(rbd, equation_fn):
     identity is encoded entirely in the *equation_fn* argument, which is
     supplied by each concrete ``BedloadEquation.calculate()`` wrapper in
     ``bedload_equation_base.py``. This eliminates the dual-location equation
-    identity that existed in the previous dispatcher design.
+    identity used by the selected bedload equation.
 
     Parameters
     ----------
@@ -325,18 +325,18 @@ def _compute_qb(rbd, equation_fn):
     equation_fn : callable
         One of :func:`MeyerPeter_Muller`, :func:`FernandezLuque_VanBeek`,
         :func:`Wong_Parker`, or :func:`Huang`.
-        Signature: ``(rbd, qb_star, tau_star, var_cr, tau_star_cr_0) -> qb_star``.
+        Signature : ``(rbd, qb_star, tau_star, var_cr, tau_star_cr_0) -> qb_star``
 
     Returns
     -------
-    qb : ndarray, shape (n_links,)
+    qb : ndarray
         Volumetric bedload transport rate per unit width [m²/s] at each link.
-        Signed: positive in the positive link direction.
+        Signed : positive in the positive link direction
     """
     shear_stress = rbd._surface_water__shear_stress_link
     shear_stress_signed = rbd._shear_stress
     rho = rbd._rho  # scalar OR per-link ndarray
-    R = rbd._R  # (rho_s - rho) / rho — scalar OR array
+    R = rbd._R  # (rho_s - rho) / rho  -  scalar OR array
     g = rbd._g
     gs_D50 = rbd._bed_surf__median_size_link
     dz_ds = rbd._dz_ds
@@ -373,26 +373,20 @@ def _compute_qb(rbd, equation_fn):
 
 
 # ---------------------------------------------------------------------------
-# Legacy dispatcher — retained for backward compatibility only
+# Legacy dispatcher  -  retained for backward compatibility only
 # ---------------------------------------------------------------------------
 
 
 def bedload_equation(rbd):
-    """Deprecated entry point kept for backward compatibility.
+    """Select and run an MPM-style bedload equation.
 
-    New code should use ``EQUATION_REGISTRY`` in ``bedload_equation_base.py``
-    and call ``BedloadEquation.calculate(rbd)`` instead.  That path calls
-    :func:`_compute_qb` directly with the correct sub-function, removing the
-    need to re-read ``rbd._bedload_equation`` at dispatch time.
-
-    .. deprecated::
-        Pass the equation key to :class:`RiverBedDynamics` via
-        ``bedload_equation=`` and let the registry handle dispatch.
+    The selected equation key determines which transport formulation is
+    evaluated from the supplied component state.
     """
     warnings.warn(
-        "bedload_equation() is deprecated. Instantiate RiverBedDynamics with "
-        "the desired bedload_equation= key and let EQUATION_REGISTRY dispatch "
-        "via BedloadEquation.calculate() instead.",
+        "bedload_equation() is retained for existing scripts. Instantiate "
+        "RiverBedDynamics with the desired bedload_equation= key for "
+        "registry-based dispatch.",
         DeprecationWarning,
         stacklevel=2,
     )
@@ -410,17 +404,17 @@ def bedload_equation(rbd):
 # Individual transport equations
 # Each function is a pure computation: it receives all required state as
 # arguments and returns the updated qb_star array.  None of these functions
-# read rbd._bedload_equation — equation identity is determined by which
+# read rbd._bedload_equation  -  equation identity is determined by which
 # function is called, not by a string lookup.
 # ---------------------------------------------------------------------------
 
 
 def MeyerPeter_Muller(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0):
-    """Surface-based bedload transport equation of Meyer-Peter and Müller.
+    """Calculate surface-based bedload transport with the Meyer-Peter and Müller equation.
 
     Meyer-Peter, E. and Müller, R., 1948, Formulas for Bed-Load Transport,
     Proceedings, 2nd Congress, International Association of Hydraulic
-    Research, Stockholm: 39-64.
+    Research, Stockholm : 39-64
     """
     tau_star_cr = _get_tau_star_cr(rbd, tau_star, 0.047, tau_star_cr_0)
     qb_star_coeff = 8
@@ -432,7 +426,7 @@ def MeyerPeter_Muller(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0
 
 
 def FernandezLuque_VanBeek(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0):
-    """Surface-based bedload transport equation of Fernandez Luque and van Beek.
+    """Calculate surface-based bedload transport with the Fernandez Luque and van Beek equation.
 
     Fernandez Luque, R. and R. van Beek, 1976, Erosion and transport of
     bedload sediment, Journal of Hydraulic Research, 14(2): 127-144.
@@ -447,7 +441,7 @@ def FernandezLuque_VanBeek(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star
 
 
 def Wong_Parker(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0):
-    """Surface-based bedload transport equation of Wong and Parker.
+    """Calculate surface-based bedload transport with the Wong and Parker equation.
 
     Wong and Parker 2006, Reanalysis and Correction of Bed-Load Relation of
     Meyer-Peter and Müller Using Their Own Database. Journal of Hydraulic
@@ -463,7 +457,7 @@ def Wong_Parker(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0):
 
 
 def Huang(rbd, qb_star, tau_star, var_cr_shear_stress, tau_star_cr_0):
-    """Surface-based bedload transport equation of He Qing Huang.
+    """Calculate surface-based bedload transport with the He Qing Huang equation.
 
     Huang, H. Q. (2010), Reformulation of the bed load equation of Meyer-Peter
     and Müller in light of the linearity theory for alluvial channel flow,

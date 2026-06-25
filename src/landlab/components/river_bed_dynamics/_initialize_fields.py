@@ -1,5 +1,5 @@
 """
-Implements a series of functions to create and/or initialize the required fields
+Create and initialize fields required by RiverBedDynamics.
 where calculations are conducted.
 
 .. codeauthor:: Angel Monsalve
@@ -189,6 +189,7 @@ import numpy as np
 
 
 def field_at_node(grid, field):
+    """Initialize a scalar field at grid nodes."""
     n_nodes = grid.number_of_nodes
 
     if field is None:
@@ -206,6 +207,7 @@ def field_at_node(grid, field):
 
 
 def field_at_link(grid, field):
+    """Initialize a scalar field at grid links."""
     n_links = grid.number_of_links
 
     if field is None:
@@ -223,6 +225,7 @@ def field_at_link(grid, field):
 
 
 def gsd_at_link(grid, field, gsd):
+    """Initialize a grain-size-distribution field at grid links."""
     n_links = grid.number_of_links
 
     if field is None:
@@ -240,6 +243,7 @@ def gsd_at_link(grid, field, gsd):
 
 
 def velocity_at_link(grid, field):
+    """Initialize a velocity field at grid links."""
     n_links = grid.number_of_links
 
     if field is None:

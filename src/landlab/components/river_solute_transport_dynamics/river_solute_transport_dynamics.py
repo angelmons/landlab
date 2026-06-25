@@ -130,7 +130,7 @@ class RiverSoluteTransportDynamics(Component):
         ``storage_zone__{name}__concentration``,
         ``streambed__{name}__sorbate_concentration``, and
         ``lateral__{name}__concentration``.
-        Default: ``["tracer"]``
+        Default : ``"tracer"``
     dispersion_mode : str, optional
         ``"anisotropic"`` computes D_L and D_T from depth and shear velocity
         (Fischer, 1979).  ``"isotropic"`` uses a single user-supplied D
@@ -252,6 +252,7 @@ class RiverSoluteTransportDynamics(Component):
         outlet_boundary_condition="zero_gradient",
         fixed_outlet_concentration=None,
     ):
+        """Initialize RiverSoluteTransportDynamics."""
         super().__init__(grid)
 
         if solutes is None:

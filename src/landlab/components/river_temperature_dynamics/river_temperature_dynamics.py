@@ -145,7 +145,7 @@ class RiverTemperatureDynamics(Component):
         correction [m]. Default: 0.01
     wind_adj : float, optional
         Empirical multiplier applied to evaporative and convective fluxes.
-        Default: 1.0 (no adjustment).
+        Default : 1.0 (no adjustment)
     h_min : float, optional
         Minimum depth used to prevent division by zero in the heat budget
         [m]. Default: 0.01
@@ -332,6 +332,7 @@ class RiverTemperatureDynamics(Component):
     ):
         # Store flag before super().__init__ so the pre-creation block
         # below can reference it cleanly.
+        """Initialize RiverTemperatureDynamics."""
         self._heat_exchange = heat_exchange
 
         # When heat exchange is disabled, pre-populate the required
@@ -499,7 +500,7 @@ class RiverTemperatureDynamics(Component):
             self._interp_cloud = lambda t: 0.0
 
     def update_meteorology(self, t_sim):
-        """Updates the grid fields with interpolated values at current time."""
+        """Update the grid fields with interpolated values at the current time."""
         if not self._dynamic_met:
             return
 

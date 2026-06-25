@@ -1,5 +1,5 @@
 """
-Implements a series of functions to create, initialize, and run the stratigraphy
+Create, initialize, and update stratigraphy fields for RiverBedDynamics.
 tracking algorithm
 
 .. codeauthor:: Angel Monsalve
@@ -13,7 +13,7 @@ import numpy as np
 
 
 def checks_correct_equation_to_track_stratigraphy(self):
-    """If by mistake track_stratigraphy was set as True but a MPM style equation was selected
+    """Check whether stratigraphy tracking is compatible with the selected bedload equation.
     this function returns track_stratigraphy to False
 
     Examples
@@ -82,7 +82,7 @@ def checks_correct_equation_to_track_stratigraphy(self):
 
 
 def create_links_dictionary(self):
-    """Creates a dictonary containing link's information related to
+    """Create a dictionary containing link information related to
     surface and subsurface gsd"""
     if self._track_stratigraphy:
         z = self._grid["link"]["topographic__elevation"]
@@ -118,6 +118,7 @@ def create_links_dictionary(self):
 
 
 def checks_erosion_or_deposition(self):
+    """Check whether a node is eroding or depositing sediment."""
     if self._track_stratigraphy:
         # Updates the thickness of the new layers
         self._bed_surf__thick_new_layer_link = (

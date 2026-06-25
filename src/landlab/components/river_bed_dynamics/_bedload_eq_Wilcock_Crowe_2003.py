@@ -1,5 +1,5 @@
 """
-Implements the Wiclock and Crowe 2003 bed load transport equations to calculate bed load
+Implement the Wilcock and Crowe (2003) bedload transport equation to calculate bedload
 rates at links.
 
 .. codeauthor:: Angel Monsalve
@@ -113,7 +113,7 @@ import numpy as np
 
 
 def bedload_equation(self):
-    """Surface-based bedload transport equation of Wilcock and Crowe 2003
+    """Calculate surface-based bedload transport with the Wilcock and Crowe (2003) equation.
 
     Wilcock, P. R., & Crowe, J. C. (2003). Surface-based transport model
     for mixed-size sediment. Journal of hydraulic engineering, 129(2),

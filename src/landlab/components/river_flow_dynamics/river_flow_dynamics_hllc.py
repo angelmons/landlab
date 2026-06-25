@@ -22,15 +22,15 @@ A fast and stable well-balanced scheme with hydrostatic reconstruction for
 shallow water flows. *SIAM J. Sci. Comput.* https://doi.org/10.1137/S1064827503431090
 
 Notes
-------------
-* HLLC Riemann flux — correct shocks, hydraulic jumps, transcritical flow
-* Audusse hydrostatic reconstruction — exact well-balancedness
-* Strang operator splitting — second-order isotropy
+-----
+* HLLC Riemann flux  -  correct shocks, hydraulic jumps, transcritical flow
+* Audusse hydrostatic reconstruction  -  exact well-balancedness
+* Strang operator splitting  -  second-order isotropy
 * Transmissive (zero-gradient) outflow BCs on all edges by default
 * Optional per-edge reflective wall BCs  (wall_edges parameter)
 * Inflow BCs on any edge: depth + u + v at specified nodes
-* Non-uniform Manning's n — scalar or per-node array / grid field
-* Implicit Manning friction — no stiffness at shallow depths
+* Non-uniform Manning's n  -  scalar or per-node array / grid field
+* Implicit Manning friction  -  no stiffness at shallow depths
 * Auto-populate surface_water__velocity at links (update_link_fields=True)
 * Adaptive CFL time-stepping (or user-supplied fixed dt)
 * Positive-depth guarantee throughout
@@ -153,6 +153,7 @@ _H_DRY = 1e-4  # depth threshold for wet/dry distinction [m]
 
 
 def _swe_flux_x(h, hu, hv, g):
+    """Calculate the physical shallow-water flux in the x direction."""
     inv_h = np.where(h > 0.0, 1.0 / np.where(h > 0.0, h, 1.0), 0.0)
     u = hu * inv_h
     return hu, hu * u + 0.5 * g * h**2, hu * (hv * inv_h)
@@ -173,7 +174,7 @@ def _wave_speeds(hL, uL, hR, uR, g):
     References
     ----------
     Brufau, Vázquez-Cendón, García-Navarro (2002).  A numerical model for
-        flooding and drying of irregular domains.  IJNMF 39, 247–275.
+        flooding and drying of irregular domains.  IJNMF 39, 247-275.
     Toro, E.F. (2001).  *Shock-Capturing Methods for Free-Surface Shallow
         Flows*, §10.5.1.
     """
@@ -226,6 +227,7 @@ def _wave_speeds(hL, uL, hR, uR, g):
 
 
 def _hllc_star_flux(h, hu, hv, Fh, Fhu, Fhv, S, S_star, g):
+    """Calculate HLLC star-region fluxes."""
     inv_h = np.where(h > 0.0, 1.0 / np.where(h > 0.0, h, 1.0), 0.0)
     v = hv * inv_h
     dss = S - S_star
@@ -251,6 +253,7 @@ def _hllc_flux_x(hL, huL, hvL, hR, huR, hvR, g=_G):
     uRs = (~uL) & (~uLs) & (SR >= 0.0)
 
     def w(a, b, c, d):
+        """Return the wave-speed estimate for one state."""
         return np.where(uL, a, np.where(uLs, b, np.where(uRs, c, d)))
 
     return w(FhL, FLh, FRh, FhR), w(FhuL, FLhu, FRhu, FhuR), w(FhvL, FLhv, FRhv, FhvR)
@@ -262,12 +265,14 @@ def _hllc_flux_x(hL, huL, hvL, hR, huR, hvR, g=_G):
 
 
 def _vanleer(a, b):
+    """Calculate a Van Leer limited slope."""
     ab = a * b
     s = a + b
     return np.where(ab > 0.0, 2.0 * ab / np.where(np.abs(s) > 1e-14, s, 1.0), 0.0)
 
 
 def _muscl_x(q_p):
+    """Reconstruct MUSCL left and right interface states."""
     dq = q_p[:, 1:] - q_p[:, :-1]
     slp = np.zeros_like(q_p)
     slp[:, 1:-1] = 0.5 * _vanleer(dq[:, :-1], dq[:, 1:])
@@ -275,6 +280,7 @@ def _muscl_x(q_p):
 
 
 def _hydro_recon(etaL, etaR, zL, zR):
+    """Apply hydrostatic reconstruction to neighboring states."""
     zf = np.maximum(zL, zR)
     return np.maximum(0.0, etaL - zf), np.maximum(0.0, etaR - zf), zf
 
@@ -323,14 +329,14 @@ def _solve_subcritical_inflow(
 
     Parameters
     ----------
-    q_target : array (nr,)
+    q_target : ndarray
         Prescribed discharge per unit width [m^2/s] at each row of the boundary.
         Positive values mean inflow into the domain.
-    h_interior, hu_interior, hv_interior : array (nr,)
+    h_interior, hu_interior, hv_interior : ndarray
         State of the boundary-adjacent interior cells.
-    z_ghost : array (nr,)
+    z_ghost : ndarray
         Bed elevation at the ghost cell (typically matches the interior bed).
-    hv_ghost_target : array (nr,)
+    hv_ghost_target : ndarray
         Prescribed transverse momentum at the boundary [m^2/s].
     g : float
     side : "left" or "right"
@@ -621,7 +627,7 @@ def _x_sweep(
     # The key requirement (Audusse et al. 2004 §2.2; Liang & Borthwick 2009
     # "compatible discretization") is that the source be built from the
     # CELL-CENTERED surface elevation referenced to the same raised-bed face
-    # step `zf = max(zL, zR)` that the flux uses — NOT from the MUSCL-
+    # step `zf = max(zL, zR)` that the flux uses  -  NOT from the MUSCL-
     # reconstructed face values.  Using reconstructed eta here couples the
     # well-balancing to the slope limiter and injects spurious momentum on a
     # flat bed whenever the surface varies .
@@ -697,6 +703,7 @@ def _y_sweep(
 
 
 def _friction(h, hu, hv, dt, n_2d, g=_G):
+    """Apply implicit Manning friction to momentum fields."""
     wet = h > _H_DRY
     ih = np.where(wet, 1.0 / np.where(wet, h, 1.0), 0.0)
     spd = np.sqrt((hu * ih) ** 2 + (hv * ih) ** 2)
@@ -706,6 +713,7 @@ def _friction(h, hu, hv, dt, n_2d, g=_G):
 
 
 def _pos(h, hu, hv):
+    """Enforce nonnegative water depth and mask dry-cell momentum."""
     h = np.maximum(h, 0.0)
     hu = np.where(h > _H_DRY, hu, 0.0)
     hv = np.where(h > _H_DRY, hv, 0.0)
@@ -713,6 +721,7 @@ def _pos(h, hu, hv):
 
 
 def _dt(h, hu, hv, dx, dy, cfl=0.45, g=_G):
+    """Calculate a stable timestep from the CFL condition."""
     wet = h > _H_DRY
     ih = np.where(wet, 1.0 / np.where(wet, h, 1.0), 0.0)
     c = np.sqrt(g * np.maximum(h, 0.0))
@@ -742,6 +751,7 @@ def _step(
     inflow_bottom=None,
     inflow_top=None,
 ):
+    """Advance the HLLC solution by one internal timestep."""
     kx = {
         "g": g,
         "order": order,
@@ -830,7 +840,7 @@ class RiverFlowDynamics_HLLC(Component):
 
     outlet_max_depth : float or None, optional
         Ramp-up outlet depth cap [m]. When set, the outlet depth is clamped
-        to ``min(h_local, outlet_max_depth)`` — the target depth is only
+        to ``min(h_local, outlet_max_depth)``  -  the target depth is only
         enforced once the local water depth reaches or exceeds this value.
         This prevents the fixed-stage BC from pulling water out of a dry or
         partially-wet outlet at the start of a simulation.
@@ -841,7 +851,7 @@ class RiverFlowDynamics_HLLC(Component):
         Edges treated as **reflective walls** (zero normal velocity).
         Subset of ``{'left', 'right', 'bottom', 'top'}``.
         Edges not listed use **transmissive** (zero-gradient) outflow BCs.
-        Default: empty set (all edges transmissive).
+        Default : empty set (all edges transmissive)
 
     update_link_fields : bool, optional
         If ``True``, ``surface_water__velocity`` at links is updated every
@@ -850,31 +860,31 @@ class RiverFlowDynamics_HLLC(Component):
 
     Notes
     -----
-    Outflow (transmissive) BC — the default for every edge.
+    Outflow (transmissive) BC  -  the default for every edge.
     Ghost cells are set to the boundary cell value (zero-gradient), which
     allows waves and flow to exit without numerical reflection.  This is the
     standard first-order transmissive (Sommerfeld-like) outflow condition for
     hyperbolic systems and is appropriate for all open boundaries.
 
-    Wall (reflective) BC — enabled via ``wall_edges``.
+    Wall (reflective) BC  -  enabled via ``wall_edges``.
     The normal momentum component is negated in the ghost cell, producing
     zero normal flux at that face.  Use for physical walls or closed ends.
 
-    Inflow BC — specified via ``fixed_entry_nodes``.
+    Inflow BC  -  specified via ``fixed_entry_nodes``.
     Depth and velocity are overwritten before and after each step
     (Dirichlet enforcement).  Can be applied on any edge or interior nodes.
 
-    Outlet (fixed stage/depth) BC — specified via ``fixed_exit_nodes``.
+    Outlet (fixed stage/depth) BC  -  specified via ``fixed_exit_nodes``.
     Depth (or stage) is overwritten before and after each step (Dirichlet).
     Use this to constrain downstream water-surface elevation / depth for
     controlled outflow comparisons or steady channel tests.
 
-    Non-uniform roughness — pass a per-node array or pre-populate
+    Non-uniform roughness  -  pass a per-node array or pre-populate
     ``"mannings_n_at_node"`` before creating the component.  The roughness
     array is used directly in the implicit friction solve each step; values
     of zero give frictionless cells.
 
-    Link velocity field — set ``update_link_fields=True`` to
+    Link velocity field  -  set ``update_link_fields=True`` to
     automatically populate ``surface_water__velocity`` (scalar speed at
     links) after each step.  Values are the face-normal component of the
     node-averaged velocity.
@@ -982,6 +992,7 @@ class RiverFlowDynamics_HLLC(Component):
         use_elder=False,
         elder_alpha=0.6,
     ):
+        """Initialize RiverFlowDynamics_HLLC."""
         if not isinstance(grid, RasterModelGrid):
             raise TypeError("RiverFlowDynamics_HLLC requires a RasterModelGrid.")
         super().__init__(grid)
@@ -1035,7 +1046,7 @@ class RiverFlowDynamics_HLLC(Component):
 
         # ── Manning's n ───────────────────────────────────────────────────
         if "mannings_n_at_node" in grid.at_node:
-            # Live view — updates automatically if the field changes
+            # Live view  -  updates automatically if the field changes
             self._n_2d = grid.at_node["mannings_n_at_node"].reshape(nr, nc)
         else:
             n_arr = np.asarray(mannings_n, dtype=float)
@@ -1069,7 +1080,7 @@ class RiverFlowDynamics_HLLC(Component):
         # and the HLLC Riemann problem at the boundary face then delivers the
         # exact prescribed (h u, h u^2 + ½ g h^2, h u v) flux into the
         # adjacent interior cell.  This is the canonical way to impose a
-        # subcritical inflow in a finite-volume SWE scheme — directly setting
+        # subcritical inflow in a finite-volume SWE scheme  -  directly setting
         # the interior cell state (as a Dirichlet on the cell) leaves a
         # spurious Riemann problem at the face to the next interior cell
         # whenever the interior deviates from the prescribed state, with
@@ -1252,11 +1263,13 @@ class RiverFlowDynamics_HLLC(Component):
     @property
     def elapsed_time(self):
         # Total simulated time [s] since component creation.
+        """Return elapsed model time."""
         return self._t
 
     @property
     def current_dt(self):
         # CFL-based adaptive time step for the next call [s].
+        """Return the most recent timestep."""
         return _dt(self._h, self._hu, self._hv, self._dx, self._dy, self._cfl, self._g)
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1370,6 +1383,7 @@ class RiverFlowDynamics_HLLC(Component):
         return vel
 
     def _populate_link_velocity(self):
+        """Populate the link velocity field from nodal velocity components."""
         if "surface_water__velocity" not in self._grid.at_link:
             self._grid.add_zeros("surface_water__velocity", at="link")
         self._grid.at_link["surface_water__velocity"][:] = np.abs(
@@ -1381,6 +1395,7 @@ class RiverFlowDynamics_HLLC(Component):
     # ──────────────────────────────────────────────────────────────────────
 
     def _apply_inflow(self):
+        """Apply fixed inflow boundary conditions."""
         if self._entry_nodes is None:
             return
         r, c = self._entry_rows, self._entry_cols
@@ -1389,6 +1404,7 @@ class RiverFlowDynamics_HLLC(Component):
         self._hv[r, c] = self._entry_h * self._entry_v
 
     def _apply_outlet(self):
+        """Apply fixed outlet boundary conditions."""
         if self._exit_nodes is None:
             return
         r, c = self._exit_rows, self._exit_cols
@@ -1426,6 +1442,7 @@ class RiverFlowDynamics_HLLC(Component):
         self._hv[r, c] = hv_set
 
     def _update_derived(self):
+        """Update derived water-surface and velocity fields."""
         np.add(self._h, self._z, out=self._eta)
         wet = self._h > _H_DRY
         ih = np.where(wet, 1.0 / np.where(wet, self._h, 1.0), 0.0)

@@ -19,7 +19,7 @@ Two formulations are supported (selected at component construction time):
 
 where the unsteady friction slope is::
 
-    sf = S₀ − ∂h/∂s − (U/g) ∂U/∂s − (1/g) ∂U/∂t
+    sf = S₀ - ∂h/∂s - (U/g) ∂U/∂s - (1/g) ∂U/∂t
 
 .. codeauthor:: Angel Monsalve (original implementation)
 """
@@ -30,7 +30,7 @@ import numpy as np
 
 
 class ShearStressCalculator:
-    """Computes unsteady shear stress at every link of a Landlab raster grid.
+    """Compute unsteady shear stress at every link of a Landlab raster grid.
 
     Parameters
     ----------
@@ -120,9 +120,10 @@ class ShearStressCalculator:
             )
 
     def calculate(self, rbd) -> None:
+        """Calculate shear stress from the selected formulation."""
         g = rbd._grid
 
-        # ── S₀ = −∂z/∂s ──────────────────────────────────────────────────
+        # ── S₀ = -∂z/∂s ──────────────────────────────────────────────────
         # Always computed: required by downstream bedload equations for local slope corrections.
         z = g.at_node["topographic__elevation"]
         rbd._dz_ds = -g.calc_grad_at_link(z)
@@ -150,7 +151,7 @@ class ShearStressCalculator:
             h = g["node"]["surface_water__depth"]
             dh_ds = g.calc_grad_at_link(h)
 
-            # ∂U/∂s — velocity gradient at links
+            # ∂U/∂s  -  velocity gradient at links
             du_ds = rbd._topo_du_ds_scratch
             du_ds[:] = 0.0
 
@@ -164,7 +165,7 @@ class ShearStressCalculator:
             vl = rbd._topo_vertical_links
             du_ds[vl] = np.flip(du_ds_v.T, axis=1).flatten(order="F")
 
-            # ∂U/∂t — temporal velocity gradient
+            # ∂U/∂t  -  temporal velocity gradient
             u_prev = rbd._surface_water__velocity_prev_time_link
             du_dt = (rbd._u - u_prev) / g._dt
 

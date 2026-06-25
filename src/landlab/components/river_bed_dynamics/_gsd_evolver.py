@@ -9,12 +9,10 @@ Reference
 ---------
 Toro-Escobar, C. M., Paola, C., & Parker, G. (1996). Transfer function for
 the deposition of poorly sorted gravel in response to streambed aggradation.
-Journal of Hydraulic Research, 34(1), 35–53.
+Journal of Hydraulic Research, 34(1), 35-53.
 https://doi.org/10.1080/00221689609498763
 
 .. codeauthor:: Angel Monsalve (original implementation)
-.. codeauthor:: Phase-3C refactor — class extraction
-.. codeauthor:: Phase-4B — TVD minmod advection scheme
 """
 
 from __future__ import annotations
@@ -22,12 +20,12 @@ from __future__ import annotations
 import numpy as np
 
 # --------------------------------------------------------------------------- #
-# TVD minmod helpers (Phase 4B)                                                 #
+# TVD minmod helpers                                                 #
 # --------------------------------------------------------------------------- #
 
 
 def _minmod(a: np.ndarray, b: np.ndarray) -> np.ndarray:
-    """Element-wise minmod limiter: smaller magnitude when same sign, else 0.
+    """Calculate the element-wise minmod limiter.
 
     Examples
     --------
@@ -59,7 +57,7 @@ class GSDEvolver:
 
 
 class ToroEscobarEvolver(GSDEvolver):
-    """Toro-Escobar (1996) fractional Exner GSD evolution.
+    """Represent the Toro-Escobar (1996) fractional Exner GSD evolution scheme.
 
     Implements the upwind finite-difference Exner equation for each grain
     fraction, using the TVD-like flux scheme of Toro-Escobar et al. (1996).
@@ -71,9 +69,9 @@ class ToroEscobarEvolver(GSDEvolver):
     gsd_advection_scheme : str, optional
         Spatial discretisation for the fractional bedload flux divergence.
 
-        * ``"upwind"`` (default) — blended upwind / Lax–Wendroff scheme
+        * ``"upwind"`` (default)  -  blended upwind / Lax-Wendroff scheme
           controlled by ``rbd._alpha``.
-        * ``"tvd_minmod"`` — TVD minmod-limited scheme; second-order in
+        * ``"tvd_minmod"``  -  TVD minmod-limited scheme; second-order in
           smooth regions, first-order at GSD fronts.  Produces sharper
           fronts with less numerical diffusion than pure upwind.
 
@@ -93,10 +91,10 @@ class ToroEscobarEvolver(GSDEvolver):
         gsd_advection_scheme : str, optional
             Spatial scheme for the fractional bedload flux divergence:
 
-            * ``"upwind"`` (default) — blended upwind / Lax–Wendroff
+            * ``"upwind"`` (default)  -  blended upwind / Lax-Wendroff
               controlled by ``rbd._alpha``.  First-order when ``alpha = 1``,
               second-order when ``alpha = 0``.  Diffusive but stable.
-            * ``"tvd_minmod"`` — Total Variation Diminishing scheme with
+            * ``"tvd_minmod"``  -  Total Variation Diminishing scheme with
               minmod limiter.  Second-order in smooth regions; reverts to
               first-order upwind at GSD fronts.  Sharper fronts, less
               numerical diffusion than pure upwind.
@@ -133,12 +131,12 @@ class ToroEscobarEvolver(GSDEvolver):
 
         Reads all required state from ``rbd`` and writes back:
 
-        * ``rbd._bed_surf__gsd_link`` — updated surface GSD at links [−]
-        * ``rbd._bed_surf__gsd_node`` — updated surface GSD at nodes [−]
-        * ``rbd._topogr__elev_orig_link`` — updated reference elevation [m]
-        * ``rbd._bed_surf__gsd_residual_max`` — max ``|Σf_i − 1|`` before
+        * ``rbd._bed_surf__gsd_link``  -  updated surface GSD at links [-]
+        * ``rbd._bed_surf__gsd_node``  -  updated surface GSD at nodes [-]
+        * ``rbd._topogr__elev_orig_link``  -  updated reference elevation [m]
+        * ``rbd._bed_surf__gsd_residual_max``  -  max ``|Σf_i - 1|`` before
           renormalisation (diagnostic)
-        * ``rbd._bed_surf__gsd_residual_mean`` — mean diagnostic
+        * ``rbd._bed_surf__gsd_residual_mean``  -  mean diagnostic
 
         The method is a no-op when ``rbd._track_stratigraphy is False``.
 
@@ -215,7 +213,7 @@ class ToroEscobarEvolver(GSDEvolver):
 
         # ── Horizontal: fractional qb flux divergence ─────────────────────
         if self._scheme == "tvd_minmod":
-            # TVD minmod — second-order in smooth regions (Phase 4B)
+            # TVD minmod - second-order in smooth regions
             for idx in [hl_pos]:
                 if idx.size:
                     up = qbT[idx] * pl[idx, :] - qbT[idx - 1] * pl[idx - 1, :]
@@ -369,13 +367,13 @@ class ToroEscobarEvolver(GSDEvolver):
             gsd_Fnew += (gsd_FIexc - gsd_F) / la * (la - la0)
 
         # ── Renormalize ───────────────────────────────────────────────────
-        # Phase 4C.1: compute residual |Σfi - 1| before renormalisation
+        # Compute residual |sum(fi) - 1| before renormalisation
         row_sums = np.sum(gsd_Fnew, axis=1)
         residuals = np.abs(row_sums - 1.0)
         rbd._bed_surf__gsd_residual_max = float(residuals.max())
         rbd._bed_surf__gsd_residual_mean = float(residuals.mean())
 
-        # Phase 4C.2: warn if residual exceeds threshold
+        # Warn if residual exceeds threshold
         if (
             rbd._check_gsd_residual
             and rbd._bed_surf__gsd_residual_max > rbd._gsd_residual_threshold
@@ -392,9 +390,9 @@ class ToroEscobarEvolver(GSDEvolver):
                 stacklevel=4,
             )
 
-        # Phase 4C.3: N−1 fraction tracking — recover last fraction from rest
-        # Evolve only the first (n_grains − 1) fractions; set the last as
-        # 1 − Σ(rest).  This eliminates the accumulated drift from renorm.
+        #  N-1 fraction tracking  -  recover last fraction from rest
+        # Evolve only the first (n_grains - 1) fractions; set the last as
+        # 1 - Σ(rest).  This eliminates the accumulated drift from renorm.
         if rbd._gsd_n_minus_1:
             gsd_Fnew[:, -1] = np.maximum(0.0, 1.0 - np.sum(gsd_Fnew[:, :-1], axis=1))
 
