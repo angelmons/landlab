@@ -14,7 +14,8 @@ import numpy as np
 import pytest
 
 from landlab import RasterModelGrid
-from landlab.components import RiverBedDynamics, RiverFlowDynamics_HLLC
+from landlab.components import RiverBedDynamics
+from landlab.components import RiverFlowDynamics_HLLC
 from landlab.components.river_bed_dynamics import _bedload_eq_MPM_style as mpm
 from landlab.components.river_bed_dynamics import _critical_shear_stress as ccs
 from landlab.components.river_bed_dynamics import _fluid_properties as fp
@@ -67,14 +68,14 @@ def _rbd_grid() -> RasterModelGrid:
 
 
 def _rbd_component(**kwargs) -> RiverBedDynamics:
-    defaults = dict(
-        gsd=RBD_GSD,
-        bed_surf__gsd_loc_node=RBD_GSD_LOC,
-        bedload_equation="MPM",
-        dt=0.1,
-        check_advective_cfl=False,
-        check_gsd_residual=False,
-    )
+    defaults = {
+        "gsd": RBD_GSD,
+        "bed_surf__gsd_loc_node": RBD_GSD_LOC,
+        "bedload_equation": "MPM",
+        "dt": 0.1,
+        "check_advective_cfl": False,
+        "check_gsd_residual": False,
+    }
     defaults.update(kwargs)
     return RiverBedDynamics(_rbd_grid(), **defaults)
 
@@ -98,7 +99,6 @@ def small_grid():
     return RasterModelGrid((4, 4))
 
 
-
 # -----------------------------------------------------------------------------
 # Optional coverage for legacy duplicate bedload_equation_base.py
 # -----------------------------------------------------------------------------
@@ -120,11 +120,9 @@ def test_duplicate_nonunderscore_bedload_equation_base_delegates():
             assert qb_gsd.shape[0] == rbd._grid.number_of_links
 
 
-
 # -----------------------------------------------------------------------------
 # Critical shear stress helpers
 # -----------------------------------------------------------------------------
-
 
 
 def test_compute_critical_shear_stress_default_path():
@@ -151,6 +149,7 @@ def test_compute_critical_shear_stress_default_path():
     # Density/viscosity recovered from T = 20 degC
     assert np.allclose(out["rho"], 997.939, atol=1e-2)
 
+
 def test_compute_critical_shear_stress_with_overrides_and_array_T():
     U, h, D50 = _flow()
     rho = np.full(U.shape, 999.7)
@@ -163,6 +162,7 @@ def test_compute_critical_shear_stress_with_overrides_and_array_T():
     assert np.allclose(out["rho"], rho)
     assert np.allclose(out["mu"], mu)
 
+
 def test_compute_critical_shear_stress_temperature_lowers_threshold():
     # Colder water (higher viscosity) generally shifts the threshold; just
     # confirm the solver runs across a temperature sweep and stays finite.
@@ -171,6 +171,7 @@ def test_compute_critical_shear_stress_temperature_lowers_threshold():
     warm = ccs.compute_critical_shear_stress(U, h, D50, rho_s=2650.0, T=28.0)
     assert np.all(np.isfinite(cold["tau_cr"]))
     assert np.all(np.isfinite(warm["tau_cr"]))
+
 
 def test_log_law_u_star_with_initial_guess():
     U = np.array([0.8, 1.2])
@@ -182,6 +183,7 @@ def test_log_law_u_star_with_initial_guess():
     u_star = ccs._log_law_u_star(U, h, D50, rho, mu, u_star_guess=guess)
     assert u_star.shape == U.shape
     assert np.all(u_star > 0.0)
+
 
 def test_log_law_u_star_zero_velocity_and_no_convergence():
     # U = 0 exercises the U <= 0 branch of the default initial guess.
@@ -201,7 +203,6 @@ def test_log_law_u_star_zero_velocity_and_no_convergence():
 # -----------------------------------------------------------------------------
 
 
-
 def test_water_density_scalar_and_array():
     # Density maximum at 4 degC
     assert np.isclose(float(fp.water_density(4.0)), 1000.0, atol=1e-4)
@@ -212,6 +213,7 @@ def test_water_density_scalar_and_array():
     assert rho.shape == (4,)
     assert rho[1] >= rho.max() - 1e-9
 
+
 def test_d_rho_dT_zero_at_maximum_and_sign():
     assert np.isclose(float(fp.d_rho_dT(4.0)), 0.0, atol=1e-6)
     assert float(fp.d_rho_dT(20.0)) < 0.0  # density falls above 4 degC
@@ -220,15 +222,18 @@ def test_d_rho_dT_zero_at_maximum_and_sign():
     arr = fp.d_rho_dT(np.array([1.0, 4.0, 20.0]))
     assert np.isclose(arr[1], 0.0, atol=1e-6)
 
+
 def test_water_viscosity_known_value_and_decreasing():
     assert np.isclose(float(fp.water_viscosity(20.0)), 0.0010129, atol=1e-6)
     mu = fp.water_viscosity(np.array([5.0, 20.0, 30.0]))
     assert np.all(np.diff(mu) < 0)
 
+
 def test_d_mu_dT_negative():
     assert float(fp.d_mu_dT(20.0)) < 0.0
     arr = fp.d_mu_dT(np.array([10.0, 20.0, 30.0]))
     assert np.all(arr < 0.0)
+
 
 def test_particle_reynolds():
     re = fp.particle_reynolds(
@@ -241,6 +246,7 @@ def test_particle_reynolds():
     assert np.isclose(re[0], 500.0)
     assert np.isclose(re[1], 1000.0)
 
+
 def test_viscous_sublayer_thickness_finite_and_infinite():
     delta = fp.viscous_sublayer_thickness(
         u_star=np.array([0.1, 0.0]),
@@ -251,10 +257,12 @@ def test_viscous_sublayer_thickness_finite_and_infinite():
     assert np.isclose(delta[0], 11.6 * 1e-6 / 0.1)
     assert np.isinf(delta[1])
 
+
 def test_b_s_log_layer_intercept():
     # _B_s should be finite and around the law-of-the-wall constant ~8.5
     b = fp._B_s(np.array([1.0, 100.0, 1e4]))
     assert np.all(np.isfinite(b))
+
 
 def test_paphitis_tau_cr_star_range():
     re = np.array([0.1, 1.0, 10.0, 100.0, 1000.0])
@@ -262,6 +270,7 @@ def test_paphitis_tau_cr_star_range():
     # Physically plausible band for the Shields curve
     assert np.all(tau_cr_star > 0.0)
     assert np.all(tau_cr_star < 0.2)
+
 
 def test_shields_stress():
     tau = np.array([5.0, 10.0])
@@ -281,7 +290,6 @@ def test_shields_stress():
 # -----------------------------------------------------------------------------
 
 
-
 def test_field_at_node_paths(small_grid):
     n = small_grid.number_of_nodes
     # None -> zeros
@@ -296,6 +304,7 @@ def test_field_at_node_paths(small_grid):
     empty = initf.field_at_node(small_grid, np.array([], dtype=int))
     assert empty.size == 0
 
+
 def test_field_at_link_paths(small_grid):
     n = small_grid.number_of_links
     assert initf.field_at_link(small_grid, None).shape == (n,)
@@ -303,6 +312,7 @@ def test_field_at_link_paths(small_grid):
     assert np.allclose(initf.field_at_link(small_grid, good), good)
     bad = np.ones(n + 2, dtype=float)
     assert np.all(initf.field_at_link(small_grid, bad) == 0)
+
 
 def test_gsd_at_link_paths(small_grid):
     n = small_grid.number_of_links
@@ -318,6 +328,7 @@ def test_gsd_at_link_paths(small_grid):
     bad = np.ones((n + 1, ncols), dtype=float)
     assert np.all(initf.gsd_at_link(small_grid, bad, gsd) == 0)
 
+
 def test_velocity_at_link_paths(small_grid):
     n = small_grid.number_of_links
     small_grid.add_zeros("surface_water__velocity", at="link")
@@ -332,6 +343,7 @@ def test_velocity_at_link_paths(small_grid):
     bad = np.full(n + 4, 0.7)
     assert np.allclose(initf.velocity_at_link(small_grid, bad), 0.3)
 
+
 def test_adds_2mm_to_gsd_inserts_row():
     gsd = [[32, 100, 100], [16, 25, 50], [1, 0, 0]]  # has a sub-2 mm class, no 2 mm
     out = initg.adds_2mm_to_gsd(gsd)
@@ -340,10 +352,12 @@ def test_adds_2mm_to_gsd_inserts_row():
     # And the array grew by one row
     assert out.shape[0] == len(gsd) + 1
 
+
 def test_adds_2mm_to_gsd_noop_for_coarse_gsd():
     gsd = [[32, 100, 100], [16, 25, 50], [8, 0, 0]]  # all >= 2 mm
     out = initg.adds_2mm_to_gsd(gsd)
     assert out.shape[0] == len(gsd)
+
 
 def test_remove_sand_from_gsd_parker():
     gsd = [[32, 100, 100], [16, 60, 70], [8, 30, 40], [1, 0, 0]]
@@ -351,6 +365,7 @@ def test_remove_sand_from_gsd_parker():
     # Sand (< 2 mm) removed, fractions renormalised so coarsest ends at 100
     assert np.all(out[:, 0] >= 2)
     assert np.isclose(out[0, 1], 100.0)
+
 
 def test_remove_sand_from_gsd_other_eq_is_noop():
     gsd = [[32, 100, 100], [16, 60, 70], [1, 0, 0]]
@@ -361,7 +376,6 @@ def test_remove_sand_from_gsd_other_eq_is_noop():
 # -----------------------------------------------------------------------------
 # RiverBedDynamics option sweep and integration coverage
 # -----------------------------------------------------------------------------
-
 
 
 @pytest.mark.parametrize(
@@ -381,6 +395,7 @@ def test_run_one_step_each_bedload_equation(equation):
     assert np.all(np.isfinite(rbd._surface_water__shear_stress_link))
     assert np.all(np.isfinite(rbd._sed_transp__net_bedload_node))
 
+
 def test_variable_critical_shear_stress_mueller():
     grid = _rbd_grid()
     rbd = RiverBedDynamics(
@@ -393,6 +408,7 @@ def test_variable_critical_shear_stress_mueller():
     rbd.run_one_step()
     assert np.all(np.isfinite(rbd._sed_transp__bedload_rate_link))
 
+
 def test_hydraulic_radius_shear_stress():
     grid = _rbd_grid()
     rbd = RiverBedDynamics(
@@ -404,6 +420,7 @@ def test_hydraulic_radius_shear_stress():
     )
     rbd.run_one_step()
     assert np.all(np.isfinite(rbd._surface_water__shear_stress_link))
+
 
 @pytest.mark.parametrize("formulation", ["boussinesq", "velocity_driven"])
 def test_shear_stress_formulations(formulation):
@@ -423,6 +440,7 @@ def test_shear_stress_formulations(formulation):
     rbd.run_one_step()
     assert np.all(np.isfinite(rbd._surface_water__shear_stress_link))
 
+
 def test_track_stratigraphy_multiple_steps():
     grid = _rbd_grid()
     rbd = RiverBedDynamics(
@@ -439,6 +457,7 @@ def test_track_stratigraphy_multiple_steps():
         rbd.run_one_step()
     assert np.all(np.isfinite(rbd._sed_transp__net_bedload_node))
 
+
 @pytest.mark.parametrize("mode", ["constant", "nonlinear"])
 def test_bed_diffusion(mode):
     grid = _rbd_grid()
@@ -454,6 +473,7 @@ def test_bed_diffusion(mode):
     rbd.run_one_step()
     assert np.all(np.isfinite(grid.at_node["topographic__elevation"]))
 
+
 def test_variable_fluid_properties_with_temperature():
     grid = _rbd_grid()
     rbd = RiverBedDynamics(
@@ -466,6 +486,7 @@ def test_variable_fluid_properties_with_temperature():
     )
     rbd.run_one_step()
     assert np.all(np.isfinite(rbd._surface_water__shear_stress_link))
+
 
 def test_slope_limiter():
     grid = _rbd_grid()
@@ -480,6 +501,7 @@ def test_slope_limiter():
     for _ in range(3):
         rbd.run_one_step()
     assert np.all(np.isfinite(grid.at_node["topographic__elevation"]))
+
 
 def test_fixed_nodes_and_links():
     grid = _rbd_grid()
@@ -505,7 +527,6 @@ def test_fixed_nodes_and_links():
 # -----------------------------------------------------------------------------
 
 
-
 def _build_channel():
     """An 8x6 sloping channel with high banks (walls) along top and bottom."""
     grid = RasterModelGrid((8, 6), xy_spacing=0.1)
@@ -518,6 +539,7 @@ def _build_channel():
     grid.add_zeros("surface_water__elevation", at="node")
     grid.at_node["surface_water__elevation"] += h + z
     return grid, z
+
 
 def _make_hllc(grid, z, update_link_fields=True):
     return RiverFlowDynamics_HLLC(
@@ -533,6 +555,7 @@ def _make_hllc(grid, z, update_link_fields=True):
         update_link_fields=update_link_fields,
     )
 
+
 def _spin_up(hllc, grid, n=300, dt=0.01):
     """Establish steady flow before introducing morphodynamics."""
     for _ in range(n):
@@ -540,6 +563,7 @@ def _spin_up(hllc, grid, n=300, dt=0.01):
     grid["link"]["surface_water__depth"] = map_mean_of_link_nodes_to_link(
         grid, "surface_water__depth"
     )
+
 
 def _make_rbd(grid):
     fixed = np.zeros(grid.number_of_nodes)
@@ -554,6 +578,7 @@ def _make_rbd(grid):
         bed_surf__elev_fix_node=fixed,
     )
 
+
 def _couple_step(hllc, rbd, grid, dt=0.01):
     """One coupled hydraulics -> bed step."""
     hllc.run_one_step(dt=dt)
@@ -563,6 +588,7 @@ def _couple_step(hllc, rbd, grid, dt=0.01):
     )
     rbd._grid._dt = dt
     rbd.run_one_step()
+
 
 def test_hllc_drives_rbd_coupling_executes():
     """A short coupled run: HLLC establishes flow, RBD consumes the link
@@ -587,6 +613,7 @@ def test_hllc_drives_rbd_coupling_executes():
     assert np.count_nonzero(rbd._sed_transp__bedload_rate_link) > 0
     assert np.all(np.isfinite(grid.at_node["topographic__elevation"]))
 
+
 def test_hllc_rbd_bed_responds_and_stays_finite():
     """Over a longer coupled run the bed measurably evolves, remains finite,
     and the fixed outlet nodes do not move."""
@@ -607,6 +634,7 @@ def test_hllc_rbd_bed_responds_and_stays_finite():
     assert np.max(np.abs(dz)) < 5.0
     # Fixed-elevation outlet nodes are held in place
     assert np.allclose(grid.at_node["topographic__elevation"][HLLC_EXIT_NODES], outlet0)
+
 
 def test_hllc_link_velocity_is_the_coupling_source():
     """RBD's working velocity (``rbd._u``) is exactly the link field HLLC fills
@@ -647,7 +675,6 @@ def test_hllc_link_velocity_is_the_coupling_source():
 # -----------------------------------------------------------------------------
 
 
-
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -661,6 +688,7 @@ def test_hllc_link_velocity_is_the_coupling_source():
 def test_constructor_validation_errors(kwargs, message):
     with pytest.raises(ValueError, match=message):
         _rbd_component(**kwargs)
+
 
 def test_morfac_early_exit_and_adaptive_dt_warning():
     rbd = _rbd_component(morfac=2, adaptive_dt=True, dt=1.0)
@@ -677,6 +705,7 @@ def test_morfac_early_exit_and_adaptive_dt_warning():
     assert rbd._morfac_counter == 0
     assert rbd._grid._dt == 1.0
 
+
 def test_update_fluid_properties_and_density_properties():
     rbd = _rbd_component(variable_fluid_properties=True, water_temperature=10.0)
     temperatures = np.linspace(4.0, 20.0, rbd._grid.number_of_links)
@@ -687,6 +716,7 @@ def test_update_fluid_properties_and_density_properties():
     assert rbd.water_dynamic_viscosity_link.shape == (rbd._grid.number_of_links,)
     assert np.all(np.isfinite(rbd.water_density_link))
     assert np.all(np.isfinite(rbd.water_dynamic_viscosity_link))
+
 
 def test_stable_dt_helpers_cover_zero_and_finite_transport():
     rbd = _rbd_component()
@@ -707,11 +737,13 @@ def test_stable_dt_helpers_cover_zero_and_finite_transport():
     rbd_nonlin._sed_transp__bedload_rate_link[:] = 0.01
     assert np.isfinite(rbd_nonlin.calc_max_stable_dt_diffusive())
 
+
 def test_rk2_and_implicit_bed_elevation_paths():
     for scheme in ("rk2", "implicit"):
         rbd = _rbd_component(time_stepping=scheme)
         rbd.run_one_step()
         assert np.all(np.isfinite(rbd._grid.at_node["topographic__elevation"]))
+
 
 def test_implicit_helpers_directly():
     rbd = _rbd_component()
@@ -728,6 +760,7 @@ def test_implicit_helpers_directly():
     assert rhs.shape == (rbd._grid.number_of_nodes,)
     assert dz.shape == (rbd._grid.number_of_nodes,)
 
+
 def test_bed_diffusion_cfl_warning_is_explicitly_captured():
     rbd = _rbd_component(
         use_bed_diffusion=True,
@@ -741,6 +774,7 @@ def test_bed_diffusion_cfl_warning_is_explicitly_captured():
     with pytest.warns(UserWarning, match="Diffusive CFL"):
         rbd.bed_diffusion()
     assert np.all(np.isfinite(rbd._bed_surf__diffusive_dz_node))
+
 
 def test_slope_limiter_break_and_max_iteration_paths():
     rbd_flat = _rbd_component(use_slope_limiter=True)
@@ -759,6 +793,7 @@ def test_slope_limiter_break_and_max_iteration_paths():
     )
     rbd_steep._apply_slope_limiter()
     assert rbd_steep._slope_limiter_n_avalanched == 1
+
 
 def test_gsd_evolver_validation_noop_and_tvd_path():
     with pytest.raises(ValueError, match="Unknown gsd_advection_scheme"):
@@ -796,7 +831,6 @@ def test_gsd_evolver_validation_noop_and_tvd_path():
 # -----------------------------------------------------------------------------
 # Stratigraphy deposition and erosion branches
 # -----------------------------------------------------------------------------
-
 
 
 def _strat_component():
@@ -837,6 +871,7 @@ def _strat_component():
     )
     return grid, rbd
 
+
 def test_stratigraphy_deposition_branch():
     grid, rbd = _strat_component()
     for t in range(6):
@@ -858,6 +893,7 @@ def test_stratigraphy_deposition_branch():
     assert len(rbd._link_stratigraphy_temp[link]) == 0
     assert len(rbd._link_stratigraphy[link]) == n_before + 1
 
+
 def test_stratigraphy_erosion_branch():
     grid, rbd = _strat_component()
     for t in range(8):
@@ -878,6 +914,7 @@ def test_stratigraphy_erosion_branch():
     assert len(rbd._link_stratigraphy[link]) == n_before + 1
     assert np.all(np.isfinite(rbd._bed_surf__gsd_link[link]))
 
+
 def test_checks_erosion_or_deposition_sets_flags():
     """Cover the deposition/erosion trigger detection in
     ``checks_erosion_or_deposition``. Reaching the +/- threshold by forward
@@ -891,7 +928,7 @@ def test_checks_erosion_or_deposition_sets_flags():
 
     active = grid.active_links
     fixed = set(np.atleast_1d(rbd._bed_surf__elev_fix_link_id).tolist())
-    free = [int(l) for l in active if int(l) not in fixed]
+    free = [int(link) for link in active if int(link) not in fixed]
     dep_link, ero_link = free[0], free[1]
     thr = rbd._bed_surf_new_layer_thick
 
@@ -930,7 +967,6 @@ def _utility_run(**kwargs):
     return grid, rbd
 
 
-
 def test_vector_mapper():
     grid = _rbd_grid()
     u = np.zeros(grid.number_of_links)
@@ -941,12 +977,14 @@ def test_vector_mapper():
     assert magnitude.shape == (grid.number_of_nodes,)
     assert np.all(magnitude >= 0)
 
+
 def test_map_gsd_from_link_to_node_both_locations():
     _, rbd = _utility_run(bedload_equation="Parker1990")
     surf = utilities.map_gsd_from_link_to_node(rbd, location="bed_surf")
     load = utilities.map_gsd_from_link_to_node(rbd, location="bedload")
     assert surf.shape[0] == rbd._grid.number_of_nodes
     assert load.shape[0] == rbd._grid.number_of_nodes
+
 
 def test_format_gsd_link_and_node():
     _, rbd = _utility_run(bedload_equation="Parker1990")
@@ -956,6 +994,7 @@ def test_format_gsd_link_and_node():
     df_node = utilities.format_gsd(rbd, node_gsd)
     assert df_node.index[0].startswith("Node_")
 
+
 def test_get_available_fields():
     fields = utilities.get_available_fields()
     assert isinstance(fields, list)
@@ -964,6 +1003,7 @@ def test_get_available_fields():
     # Sorted, with (name, units) pairs
     assert names == sorted(names)
 
+
 def test_velocity_driven_formulation():
     _, rbd = _utility_run(
         bedload_equation="MPM",
@@ -971,6 +1011,7 @@ def test_velocity_driven_formulation():
         mannings_n=0.03,
     )
     assert np.all(np.isfinite(rbd._surface_water__shear_stress_link))
+
 
 def test_velocity_driven_requires_mannings_n():
     grid = _rbd_grid()
@@ -982,6 +1023,7 @@ def test_velocity_driven_requires_mannings_n():
             shear_stress_formulation="velocity_driven",
             mannings_n=None,
         )
+
 
 def test_mpm_fixed_bedload_rate_link():
     grid = _rbd_grid()
@@ -997,6 +1039,7 @@ def test_mpm_fixed_bedload_rate_link():
     )
     rbd.run_one_step()
     assert np.all(np.isfinite(rbd._sed_transp__bedload_rate_link))
+
 
 def test_wilcock_crowe_fixed_rate_and_gsd_links():
     grid = _rbd_grid()
@@ -1019,12 +1062,14 @@ def test_wilcock_crowe_fixed_rate_and_gsd_links():
     rbd.run_one_step()
     assert np.all(np.isfinite(rbd._sed_transp__bedload_gsd_link))
 
+
 def test_bedload_equation_dispatcher_warning():
     _, rbd = _utility_run(bedload_equation="MPM")
     rbd._bedload_equation = "MPM"  # compatibility attribute consumed by the dispatcher
     with pytest.warns(DeprecationWarning):
         qb = mpm.bedload_equation(rbd)
     assert qb.shape[0] == rbd._grid.number_of_links
+
 
 def test_stratigraphy_layer_cycling_and_write(tmp_path):
     grid = _rbd_grid()

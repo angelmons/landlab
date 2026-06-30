@@ -43,6 +43,7 @@ simple sloped channel with a fixed inflow (left) and a fixed-depth outlet
 
 >>> import numpy as np
 >>> from landlab import RasterModelGrid
+
 >>> from landlab.components import RiverFlowDynamics_HLLC
 
 Create a small grid for demonstration purposes:
@@ -139,6 +140,8 @@ from scipy.sparse import diags
 
 from landlab import Component
 from landlab import RasterModelGrid
+
+from ._turbulence import DepthAveragedTurbulenceModel
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -958,6 +961,14 @@ class RiverFlowDynamics_HLLC(Component):
             "mapping": "link",
             "doc": "Speed of water flow above the surface",
         },
+        "surface_water__eddy_viscosity": {
+            "dtype": float,
+            "intent": "out",
+            "optional": True,
+            "units": "m2/s",
+            "mapping": "node",
+            "doc": "Depth-averaged turbulent eddy viscosity",
+        },
         "mannings_n_at_node": {
             "dtype": float,
             "intent": "in",
@@ -991,6 +1002,15 @@ class RiverFlowDynamics_HLLC(Component):
         smagorinsky_cs=0.15,
         use_elder=False,
         elder_alpha=0.6,
+        turbulence_model=None,
+        eddy_viscosity=0.0,
+        filter_width_model="grid",
+        filter_width_coefficient=1.0,
+        parabolic_alpha=None,
+        eddy_viscosity_background=0.0,
+        eddy_viscosity_max=None,
+        mask_dry_cells=True,
+        turbulent_schmidt_number=0.7,
     ):
         """Initialize RiverFlowDynamics_HLLC."""
         if not isinstance(grid, RasterModelGrid):
@@ -1245,16 +1265,49 @@ class RiverFlowDynamics_HLLC(Component):
 
         self._update_derived()
 
-        self._use_smagorinsky = use_smagorinsky
-        self._smagorinsky_cs = smagorinsky_cs
-        self._use_elder = use_elder
-        self._elder_alpha = elder_alpha
+        self._use_smagorinsky = bool(use_smagorinsky)
+        self._smagorinsky_cs = float(smagorinsky_cs)
+        self._use_elder = bool(use_elder)
+        self._elder_alpha = float(elder_alpha)
+        self._turbulent_schmidt_number = float(turbulent_schmidt_number)
 
-        # Initialize diagnostic field for Eddy Viscosity
-        if self._use_smagorinsky or self._use_elder:
+        if turbulence_model is None:
+            if self._use_smagorinsky and self._use_elder:
+                turbulence_model = "hybrid_additive"
+            elif self._use_smagorinsky:
+                turbulence_model = "smagorinsky"
+            elif self._use_elder:
+                turbulence_model = "parabolic"
+            elif float(eddy_viscosity) > 0.0:
+                turbulence_model = "constant"
+            else:
+                turbulence_model = "none"
+
+        if parabolic_alpha is None:
+            parabolic_alpha = self._elder_alpha if self._use_elder else 0.067
+
+        self._turbulence = DepthAveragedTurbulenceModel(
+            model=turbulence_model,
+            dx=self._dx,
+            dy=self._dy,
+            gravity=self._g,
+            constant_eddy_viscosity=eddy_viscosity,
+            smagorinsky_cs=self._smagorinsky_cs,
+            filter_width_model=filter_width_model,
+            filter_width_coefficient=filter_width_coefficient,
+            parabolic_alpha=parabolic_alpha,
+            background_eddy_viscosity=eddy_viscosity_background,
+            max_eddy_viscosity=eddy_viscosity_max,
+            mask_dry_cells=mask_dry_cells,
+            dry_depth_threshold=_H_DRY,
+        )
+
+        if self._turbulence.is_active:
             if "surface_water__eddy_viscosity" not in self._grid.at_node:
                 self._grid.add_zeros("surface_water__eddy_viscosity", at="node")
             self._nu_t_flat = self._grid.at_node["surface_water__eddy_viscosity"]
+        else:
+            self._nu_t_flat = None
 
     # ──────────────────────────────────────────────────────────────────────
     # Properties
@@ -1340,7 +1393,7 @@ class RiverFlowDynamics_HLLC(Component):
         self._hv[:] = hv_new
 
         # === 2D IMPLICIT DIFFUSION ===
-        if self._use_smagorinsky or self._use_elder:
+        if self._turbulence.is_active:
             self._apply_implicit_diffusion(dt)
 
         self._apply_outlet()
@@ -1452,50 +1505,16 @@ class RiverFlowDynamics_HLLC(Component):
     def _apply_implicit_diffusion(self, dt):
         """Perform implicit integration of horizontal momentum diffusion."""
         h = self._h
-        u = np.where(h > 1e-6, self._hu / h, 0.0)
-        v = np.where(h > 1e-6, self._hv / h, 0.0)
-
-        nu_t = np.zeros_like(h)
+        u = np.where(h > _H_DRY, self._hu / h, 0.0)
+        v = np.where(h > _H_DRY, self._hv / h, 0.0)
         dx, dy = self._dx, self._dy
 
-        # ── 1. Smagorinsky Closure (Shear-driven mixing) ───────────
-        if self._use_smagorinsky:
-            dudx = np.zeros_like(u)
-            dudy = np.zeros_like(u)
-            dvdx = np.zeros_like(v)
-            dvdy = np.zeros_like(v)
+        nu_t = self._turbulence.update(h, u, v, mannings_n=self._n_2d)
 
-            # Central differences (boundaries naturally remain 0)
-            dudx[:, 1:-1] = (u[:, 2:] - u[:, :-2]) / (2 * dx)
-            dudy[1:-1, :] = (u[2:, :] - u[:-2, :]) / (2 * dy)
-            dvdx[:, 1:-1] = (v[:, 2:] - v[:, :-2]) / (2 * dx)
-            dvdy[1:-1, :] = (v[2:, :] - v[:-2, :]) / (2 * dy)
+        if self._nu_t_flat is not None:
+            self._nu_t_flat[:] = nu_t.ravel()
 
-            S_mag = np.sqrt(2 * (dudx**2 + dvdy**2) + (dudy + dvdx) ** 2)
-            nu_smag = (self._smagorinsky_cs * np.sqrt(dx * dy)) ** 2 * S_mag
-            nu_t += nu_smag
-
-        # ── 2. Elder's Closure (Bed-friction-driven mixing) ────────
-        if self._use_elder:
-            mag_u = np.sqrt(u**2 + v**2)
-            # ``_n_2d`` is either the scalar fast path or the active
-            # per-node roughness array (including a live grid field).
-            n_field = self._n_2d
-            h_safe = np.maximum(h, 1e-6)
-            # nu_elder = alpha * u_* * h; where u_* = sqrt(g) * n * |U| / h^(1/6)
-            nu_elder = (
-                self._elder_alpha
-                * np.sqrt(self._g)
-                * n_field
-                * mag_u
-                * (h_safe ** (5.0 / 6.0))
-            )
-            nu_t += np.where(h > 1e-6, nu_elder, 0.0)
-
-        # Store for diagnostics
-        self._nu_t_flat[:] = nu_t.flatten()
-
-        # ── 3. Sparse Matrix Assembly ──────────────────────────────
+        # ── Sparse Matrix Assembly ─────────────────────────────────
         # We solve:  h u^{n+1} - dt * ∇ · (h nu_t ∇ u^{n+1}) = h u^n
         Gamma = h * nu_t
         nrows, ncols = h.shape

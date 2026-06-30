@@ -222,6 +222,14 @@ class RiverSoluteTransportDynamics(Component):
             "mapping": "link",
             "doc": "Link-parallel advection velocity magnitude",
         },
+        "surface_water__eddy_viscosity": {
+            "dtype": float,
+            "intent": "in",
+            "optional": True,
+            "units": "m2/s",
+            "mapping": "node",
+            "doc": "Depth-averaged turbulent eddy viscosity",
+        },
     }
 
     def __init__(
@@ -235,6 +243,9 @@ class RiverSoluteTransportDynamics(Component):
         alpha_L=10.0,
         alpha_T=0.6,
         ustar_fraction=0.1,
+        use_turbulent_diffusivity=False,
+        turbulent_schmidt_number=0.7,
+        eddy_viscosity_field="surface_water__eddy_viscosity",
         # -- Transient storage (OTIS: ALPHA, AREA2, CSBACK) --
         alpha_exchange=None,
         h_storage=None,
@@ -277,6 +288,19 @@ class RiverSoluteTransportDynamics(Component):
         self._alpha_L = alpha_L
         self._alpha_T = alpha_T
         self._ustar_fraction = ustar_fraction
+        self._use_turbulent_diffusivity = bool(use_turbulent_diffusivity)
+        self._turbulent_schmidt_number = float(turbulent_schmidt_number)
+        self._eddy_viscosity_field = eddy_viscosity_field
+        if self._turbulent_schmidt_number <= 0.0:
+            raise ValueError("turbulent_schmidt_number must be positive")
+        if (
+            self._use_turbulent_diffusivity
+            and self._eddy_viscosity_field not in grid.at_node
+        ):
+            raise ValueError(
+                f"{self._eddy_viscosity_field!r} must exist at nodes when "
+                "use_turbulent_diffusivity=True"
+            )
 
         # ── Reaction parameters (dicts keyed by solute name) ─────────
         self._alpha = alpha_exchange or {}
@@ -395,6 +419,10 @@ class RiverSoluteTransportDynamics(Component):
                 D_link[grid.vertical_links] = grid.map_mean_of_link_nodes_to_link(
                     np.asarray(D_T_val, dtype=float)
                 )[grid.vertical_links]
+
+        if self._use_turbulent_diffusivity:
+            nu_t_link = grid.map_mean_of_link_nodes_to_link(self._eddy_viscosity_field)
+            D_link += nu_t_link / self._turbulent_schmidt_number
 
         # -- Velocity divergence (computed once for all solutes) --
         div_u = grid.calc_flux_div_at_node(self._adv_vel)
